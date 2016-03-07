@@ -4,6 +4,9 @@
 #include <errno.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <syscall.h>
+#include <unistd.h>
+#include <stdlib.h>
 
 typedef struct lf_element_impl lf_element_impl_t;
 
@@ -15,16 +18,23 @@ typedef struct lf_element_impl {
 
 typedef struct lf_queue_impl {
     lf_element_impl_t *elements;
+    lf_element_impl_t **ptrs;
     size_t n_elements;
     size_t element_size;
+    // TODO multiple free lists
     lf_element_impl_t *free_head;
-    lf_element_impl_t *queue_head;
-    lf_element_impl_t *queue_tail;
+    size_t head;
+    size_t tail;
 } lf_queue_impl_t;
 
 static inline size_t raw_elem_size(size_t element_size)
 {
 	return element_size + sizeof(lf_element_impl_t);
+}
+
+pid_t get_tid(void)
+{
+	return (pid_t)syscall(SYS_gettid);;
 }
 
 int lf_queue_init(lf_queue_t *queue, size_t n_elements, size_t element_size)
@@ -36,25 +46,27 @@ int lf_queue_init(lf_queue_t *queue, size_t n_elements, size_t element_size)
 	qimpl->n_elements = n_elements;
 	qimpl->element_size = element_size;
 	qimpl->elements = calloc(n_elements, raw_elem_size(element_size));
+	// we count on calloc setting the memory to zero
+	qimpl->ptrs = calloc(n_elements, sizeof(lf_queue_impl_t*));
 	qimpl->free_head = qimpl->elements;
-	qimpl->queue_head = NULL;
-	qimpl->queue_tail = NULL;
+	qimpl->head = 1;
+	qimpl->tail = 0;
 
 	assert(n_elements > 0);
 	assert(element_size > 0);
 	assert(queue != NULL);
 
-	printf("qimpl->elements=%p\n", qimpl->elements);
+//	printf("qimpl->elements=%p\n", qimpl->elements);
 	curr = qimpl->elements;
 	for (i = 0; i < n_elements - 1; ++i) {
 		curr->next = (lf_element_impl_t *) ((char*)curr + raw_elem_size(element_size));
 		curr->elem.data = (void*)&curr->next + sizeof(curr->next);
-		printf("curr=%p curr->next=%p data=%p diff=%d\n", curr, curr->next, curr->elem.data, (int)((char*)curr->next - (char*)curr));
+//		printf("curr=%p curr->next=%p data=%p diff=%d\n", curr, curr->next, curr->elem.data, (int)((char*)curr->next - (char*)curr));
 		curr = curr->next;
 	}
-	printf("qimpl->elements=%p\n", qimpl->elements);
+//	printf("qimpl->elements=%p\n", qimpl->elements);
 	curr->next = NULL;
-	curr->elem.data = &curr->elem + sizeof(curr->elem);
+	curr->elem.data = (void*)&curr->next + sizeof(curr->next);
 	queue->queue = qimpl;
 	return 0;
 }
@@ -65,6 +77,7 @@ void lf_queue_destroy(lf_queue_t *queue)
 
 	assert(queue->queue != NULL);
 	free(qimpl->elements);
+	free(qimpl->ptrs);
 	free(qimpl);
 	queue->queue = NULL;
 }
@@ -72,17 +85,18 @@ void lf_queue_destroy(lf_queue_t *queue)
 int lf_queue_get(lf_queue_t *queue, lf_element_t **element)
 {
 	lf_queue_impl_t *qimpl = queue->queue;
-	lf_element_impl_t *curr_free = __sync_fetch_and_or(&qimpl->free_head, 0);
+	lf_element_impl_t *curr_free = qimpl->free_head;
 	lf_element_impl_t *prev_val;
 
 	while (curr_free) {
-		printf("curr_free=%p curr_free->next=%p\n", curr_free, curr_free->next);
+//		printf("curr_free=%p curr_free->next=%p\n", curr_free, curr_free->next);
 		prev_val = __sync_val_compare_and_swap(&qimpl->free_head,
 		                                       curr_free, curr_free->next);
 		if (prev_val == curr_free) {
 			// swap was successful
 			curr_free->next = NULL;
 			*element = &curr_free->elem;
+			printf("(%d) GET curr_free=%p *element=%p\n", get_tid(), curr_free, *element);
 			return 0;
 		}
 		curr_free = prev_val;
@@ -93,82 +107,60 @@ int lf_queue_get(lf_queue_t *queue, lf_element_t **element)
 #define container_of(ptr, container, member) \
 	((container *)((char *)ptr - offsetof(container, member)))
 
+#define MAX_TID 100000
+
 void lf_queue_enqueue(lf_queue_t *queue, lf_element_t *element)
 {
 	lf_queue_impl_t *qimpl = queue->queue;
 	lf_element_impl_t *e_impl = container_of(element, lf_element_impl_t, elem);
-	lf_element_impl_t *curr_head = __sync_fetch_and_or(&qimpl->queue_head, 0);
-	lf_element_impl_t *curr_tail = __sync_fetch_and_or(&qimpl->queue_tail, 0);
-	lf_element_impl_t *prev_val;
+	size_t tail;
+	lf_element_impl_t **pptr;
+	lf_element_impl_t *ptr;
 
-	printf("enqueue %d\n", *(int*)element->data);
-
-	while (curr_head == NULL && curr_tail == NULL) {
-		prev_val = __sync_val_compare_and_swap(&qimpl->queue_head,
-		                                       NULL, element);
-		if (prev_val == NULL) {
-			prev_val = __sync_val_compare_and_swap(&qimpl->queue_tail,
-			                                       NULL, element);
-			if (prev_val == NULL) {
-				// successfully added into an empty queue
-				return;
-			} else {
-				// TODO think about this
-				assert(0);
-			}
-		} else {
-			curr_head = __sync_fetch_and_or(&qimpl->queue_head, 0);
-			curr_tail = __sync_fetch_and_or(&qimpl->queue_tail, 0);
-		}
-	}
 	do {
-		qimpl->queue_tail->next = e_impl;
-		qimpl->queue_tail = e_impl;
-		return;
-//		e_impl->next = curr_tail;
-//		prev_val = __sync_val_compare_and_swap(&qimpl->queue_tail,
-//		                                       curr_tail, e_impl);
-//		if (prev_val == curr_tail) {
-//			return;
-//		}
-//		curr_tail = prev_val;
+		tail = __sync_add_and_fetch(&qimpl->tail, 0);
+		pptr = &qimpl->ptrs[(tail + 1) % qimpl->n_elements];
+		ptr = *pptr;
+		printf("(%d) ENQ 1 pptr=%p head=%lu tail=%lu\n", get_tid(),
+		       pptr, qimpl->head, tail);
+		if ((int)ptr > MAX_TID) {
+			continue;
+		}
+		if (__sync_bool_compare_and_swap(pptr, ptr, e_impl)) {
+			tail = __sync_add_and_fetch(&qimpl->tail, 1);
+			printf("(%d) ENQ 2 pptr=%p head=%lu tail=%lu\n", get_tid(),
+			       pptr, qimpl->head, tail);
+			return;
+		}
 	} while (true);
 }
 
 int lf_queue_dequeue(lf_queue_t *queue, lf_element_t **element)
 {
 	lf_queue_impl_t *qimpl = queue->queue;
-	lf_element_impl_t *curr_head = __sync_fetch_and_or(&qimpl->queue_head, 0);
-	lf_element_impl_t *curr_tail = __sync_fetch_and_or(&qimpl->queue_tail, 0);
-	lf_element_impl_t *prev_val;
-
-	if (curr_head == NULL) {
-		return ENOMEM;
-	}
-	while (curr_head == curr_tail) {
-		prev_val = __sync_val_compare_and_swap(&qimpl->queue_head,
-		                                       curr_head, NULL);
-		if (prev_val == curr_head) {
-			// successfully deq the last element
-			*element = &curr_head->elem;
-			return 0;
-		} else {
-			curr_head = __sync_fetch_and_or(&qimpl->queue_head, 0);
-			curr_tail = __sync_fetch_and_or(&qimpl->queue_tail, 0);
-		}
-	}
-
+	size_t head;
+	size_t tail;
+	lf_element_impl_t **ptr;
+	lf_element_impl_t *curr_ptr;
 	do {
-		prev_val = __sync_val_compare_and_swap(&qimpl->queue_head,
-		                                       curr_head, curr_head->next);
-		if (prev_val == curr_head) {
-			curr_head->next = NULL;
-			*element = &curr_head->elem;
-			return 0;
-		}
-		curr_head = prev_val;
-		if (curr_head == NULL) {
+		head = __sync_add_and_fetch(&qimpl->head, 0);
+		tail = __sync_add_and_fetch(&qimpl->tail, 0);
+		if (head > tail) {
 			return ENOMEM;
+		}
+		ptr = &qimpl->ptrs[head % qimpl->n_elements];
+		curr_ptr = *ptr;
+		printf("(%d) DEQ 1 curr_ptr=%p head=%lu tail=%lu\n", get_tid(), curr_ptr, head, tail);
+		if ((int)curr_ptr < MAX_TID) {
+			// some other thread have already made the swap
+			continue;
+		}
+		if (__sync_bool_compare_and_swap(ptr, curr_ptr, get_tid())) {
+			head = __sync_add_and_fetch(&qimpl->head, 1);
+			*element = &curr_ptr->elem;
+			printf("(%d) DEQ 2 *element=%p curr_ptr=%p head=%lu tail=%lu\n",
+			       get_tid(), *element, curr_ptr, head, tail);
+			return 0;
 		}
 	} while (true);
 }

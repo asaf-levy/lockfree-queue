@@ -9,6 +9,8 @@ macro(add_flags var)
     set(${var} "${${var}} ${_flags}")
 endmacro(add_flags)
 
+find_package(Threads REQUIRED)
+
 set(COMMON_FLAGS -Wall -Wextra -Werror -Wformat=2 -Wundef -g
         -Werror-implicit-function-declaration -Wno-unused-parameter
         -D_GNU_SOURCE)
@@ -17,3 +19,4 @@ add_flags(CMAKE_C_FLAGS ${COMMON_FLAGS} -Wstrict-prototypes
 
 set(SOURCE_FILES main.c lf_queue.c)
 add_executable(lf_queue_test ${SOURCE_FILES})
+target_link_libraries(lf_queue_test 	${CMAKE_THREAD_LIBS_INIT})

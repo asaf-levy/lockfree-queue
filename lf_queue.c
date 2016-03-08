@@ -7,6 +7,7 @@
 #include <syscall.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 typedef struct lf_element_impl lf_element_impl_t;
 
@@ -25,6 +26,7 @@ typedef struct lf_queue_impl {
     lf_element_impl_t *free_head;
     size_t head;
     size_t tail;
+    size_t sentinal;
 } lf_queue_impl_t;
 
 static inline size_t raw_elem_size(size_t element_size)
@@ -51,6 +53,7 @@ int lf_queue_init(lf_queue_t *queue, size_t n_elements, size_t element_size)
 	qimpl->free_head = qimpl->elements;
 	qimpl->head = 1;
 	qimpl->tail = 0;
+	qimpl->sentinal = 0;
 
 	assert(n_elements > 0);
 	assert(element_size > 0);
@@ -89,7 +92,6 @@ int lf_queue_get(lf_queue_t *queue, lf_element_t **element)
 	lf_element_impl_t *prev_val;
 
 	while (curr_free) {
-//		printf("curr_free=%p curr_free->next=%p\n", curr_free, curr_free->next);
 		prev_val = __sync_val_compare_and_swap(&qimpl->free_head,
 		                                       curr_free, curr_free->next);
 		if (prev_val == curr_free) {
@@ -107,7 +109,7 @@ int lf_queue_get(lf_queue_t *queue, lf_element_t **element)
 #define container_of(ptr, container, member) \
 	((container *)((char *)ptr - offsetof(container, member)))
 
-#define MAX_TID 100000
+#define SENTINAL_VALUE 100000
 
 void lf_queue_enqueue(lf_queue_t *queue, lf_element_t *element)
 {
@@ -123,14 +125,19 @@ void lf_queue_enqueue(lf_queue_t *queue, lf_element_t *element)
 		ptr = *pptr;
 		printf("(%d) ENQ 1 pptr=%p head=%lu tail=%lu\n", get_tid(),
 		       pptr, qimpl->head, tail);
-		if ((int)ptr > MAX_TID) {
+		if ((size_t)ptr > SENTINAL_VALUE || ((size_t)ptr < SENTINAL_VALUE && (size_t)ptr > tail)) {
+			printf("(%d) ENQ SENTINAL_VALUE pptr=%p head=%lu tail=%lu\n", get_tid(),
+			       pptr, qimpl->head, tail);
 			continue;
 		}
 		if (__sync_bool_compare_and_swap(pptr, ptr, e_impl)) {
 			tail = __sync_add_and_fetch(&qimpl->tail, 1);
-			printf("(%d) ENQ 2 pptr=%p head=%lu tail=%lu\n", get_tid(),
-			       pptr, qimpl->head, tail);
+			printf("(%d) ENQ 2 pptr=%p ptr=%p head=%lu tail=%lu\n", get_tid(),
+			       pptr, ptr, qimpl->head, tail);
 			return;
+		} else {
+			printf("(%d) ENQ RETRY pptr=%p head=%lu tail=%lu\n", get_tid(),
+			       pptr, qimpl->head, tail);
 		}
 	} while (true);
 }
@@ -151,16 +158,19 @@ int lf_queue_dequeue(lf_queue_t *queue, lf_element_t **element)
 		ptr = &qimpl->ptrs[head % qimpl->n_elements];
 		curr_ptr = *ptr;
 		printf("(%d) DEQ 1 curr_ptr=%p head=%lu tail=%lu\n", get_tid(), curr_ptr, head, tail);
-		if ((int)curr_ptr < MAX_TID) {
+		if ((uint64_t)curr_ptr <= qimpl->tail) {
+			printf("(%d) DEQ SENTINAL_VALUE curr_ptr=%p head=%lu tail=%lu\n", get_tid(), curr_ptr, head, tail);
 			// some other thread have already made the swap
 			continue;
 		}
-		if (__sync_bool_compare_and_swap(ptr, curr_ptr, get_tid())) {
+		if (__sync_bool_compare_and_swap(ptr, curr_ptr, qimpl->tail)) {
 			head = __sync_add_and_fetch(&qimpl->head, 1);
 			*element = &curr_ptr->elem;
 			printf("(%d) DEQ 2 *element=%p curr_ptr=%p head=%lu tail=%lu\n",
 			       get_tid(), *element, curr_ptr, head, tail);
 			return 0;
+		} else {
+			printf("(%d) DEQ RETRY curr_ptr=%p head=%lu tail=%lu\n", get_tid(), curr_ptr, head, tail);
 		}
 	} while (true);
 }
@@ -177,6 +187,7 @@ void lf_queue_put(lf_queue_t *queue, lf_element_t *element)
 		prev_val = __sync_val_compare_and_swap(&qimpl->free_head,
 		                                       curr_free, element_impl);
 		if (prev_val == curr_free) {
+			printf("(%d) PUT curr_free=%p element=%p\n", get_tid(), curr_free, element);
 			// swap was successful
 			break;
 		}

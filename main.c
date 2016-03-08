@@ -58,7 +58,7 @@ void serial_test(void)
 uint64_t g_enq_sum = 0;
 uint64_t g_deq_sum = 0;
 
-#define MT_N_ELEM 10000
+#define MT_N_ELEM 100000
 #define MT_N_THREADS 2
 
 void *enq_dec_task(void *arg)

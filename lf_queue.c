@@ -13,6 +13,7 @@ typedef struct lf_element_impl lf_element_impl_t;
 
 typedef struct lf_element_impl {
     lf_element_t elem;
+    uint32_t mod_count;
     lf_element_impl_t *next;
     // followed by the element data
 } lf_element_impl_t;
@@ -26,17 +27,32 @@ typedef struct lf_queue_impl {
     lf_element_impl_t *free_head;
     size_t head;
     size_t tail;
-    size_t sentinal;
 } lf_queue_impl_t;
+
+#define container_of(ptr, container, member) \
+	((container *)((char *)ptr - offsetof(container, member)))
+
+#define USED_BIT 0x8000000000000000
 
 static inline size_t raw_elem_size(size_t element_size)
 {
 	return element_size + sizeof(lf_element_impl_t);
 }
 
+static inline size_t element_offset(lf_queue_impl_t *queue, lf_element_impl_t *element)
+{
+	// add 1 in order to avoid an offset value of 0
+	return ((void*)element - (void*)queue->elements) + 1;
+}
+
+static inline lf_element_impl_t *get_element_by_offset(lf_queue_impl_t *queue, size_t element_offset)
+{
+	return ((void*)queue->elements + element_offset - 1);
+}
+
 pid_t get_tid(void)
 {
-	return (pid_t)syscall(SYS_gettid);;
+	return (pid_t)syscall(SYS_gettid);
 }
 
 int lf_queue_init(lf_queue_t *queue, size_t n_elements, size_t element_size)
@@ -53,21 +69,20 @@ int lf_queue_init(lf_queue_t *queue, size_t n_elements, size_t element_size)
 	qimpl->free_head = qimpl->elements;
 	qimpl->head = 1;
 	qimpl->tail = 0;
-	qimpl->sentinal = 0;
 
 	assert(n_elements > 0);
 	assert(element_size > 0);
 	assert(queue != NULL);
 
-//	printf("qimpl->elements=%p\n", qimpl->elements);
 	curr = qimpl->elements;
+	// TODO fix
 	for (i = 0; i < n_elements - 1; ++i) {
+		curr->mod_count = 0;
 		curr->next = (lf_element_impl_t *) ((char*)curr + raw_elem_size(element_size));
 		curr->elem.data = (void*)&curr->next + sizeof(curr->next);
-//		printf("curr=%p curr->next=%p data=%p diff=%d\n", curr, curr->next, curr->elem.data, (int)((char*)curr->next - (char*)curr));
 		curr = curr->next;
 	}
-//	printf("qimpl->elements=%p\n", qimpl->elements);
+	curr->mod_count = 0;
 	curr->next = NULL;
 	curr->elem.data = (void*)&curr->next + sizeof(curr->next);
 	queue->queue = qimpl;
@@ -98,7 +113,7 @@ int lf_queue_get(lf_queue_t *queue, lf_element_t **element)
 			// swap was successful
 			curr_free->next = NULL;
 			*element = &curr_free->elem;
-			printf("(%d) GET curr_free=%p *element=%p\n", get_tid(), curr_free, *element);
+//			printf("(%d) GET curr_free=%p *element=%p\n", get_tid(), curr_free, *element);
 			return 0;
 		}
 		curr_free = prev_val;
@@ -106,34 +121,39 @@ int lf_queue_get(lf_queue_t *queue, lf_element_t **element)
 	return ENOMEM;
 }
 
-#define container_of(ptr, container, member) \
-	((container *)((char *)ptr - offsetof(container, member)))
-
-#define SENTINAL_VALUE 100000
-
 void lf_queue_enqueue(lf_queue_t *queue, lf_element_t *element)
 {
 	lf_queue_impl_t *qimpl = queue->queue;
 	lf_element_impl_t *e_impl = container_of(element, lf_element_impl_t, elem);
 	size_t tail;
 	lf_element_impl_t **pptr;
-	lf_element_impl_t *ptr;
+	size_t elem_offset;
 
 	do {
 		tail = __sync_add_and_fetch(&qimpl->tail, 0);
 		pptr = &qimpl->ptrs[(tail + 1) % qimpl->n_elements];
-		ptr = *pptr;
-		printf("(%d) ENQ 1 pptr=%p head=%lu tail=%lu\n", get_tid(),
-		       pptr, qimpl->head, tail);
-		if ((size_t)ptr > SENTINAL_VALUE || ((size_t)ptr < SENTINAL_VALUE && (size_t)ptr > tail)) {
-			printf("(%d) ENQ SENTINAL_VALUE pptr=%p head=%lu tail=%lu\n", get_tid(),
+		elem_offset = (size_t)*pptr;
+		printf("(%d) ENQ 1 pptr=%p elem_offset=%lu head=%lu tail=%lu\n", get_tid(),
+		       pptr, elem_offset, qimpl->head, tail);
+		if ((elem_offset & USED_BIT)) {
+			printf("(%d) ENQ SLOT-TAKEN pptr=%p elem_offset=%lx head=%lu tail=%lu\n", get_tid(),
+			       pptr, elem_offset, qimpl->head, tail);
+			continue;
+		}
+		if ((elem_offset & ~USED_BIT) && ((elem_offset & ~USED_BIT) > tail)) {
+			printf("(%d) ENQ TAIL-UPDATED pptr=%p head=%lu tail=%lu\n", get_tid(),
 			       pptr, qimpl->head, tail);
 			continue;
 		}
-		if (__sync_bool_compare_and_swap(pptr, ptr, e_impl)) {
+		if (__sync_bool_compare_and_swap(pptr, elem_offset, USED_BIT | element_offset(qimpl, e_impl))) {
+			// one could claim since tail always advances there is the
+			// risk of a wraparound. However this is not a practical
+			// concerns since even if you add a new item to the queue
+			// every nano sec it would still take ~584 years for 64 bits
+			// to wrap.
 			tail = __sync_add_and_fetch(&qimpl->tail, 1);
-			printf("(%d) ENQ 2 pptr=%p ptr=%p head=%lu tail=%lu\n", get_tid(),
-			       pptr, ptr, qimpl->head, tail);
+			printf("(%d) ENQ 2 pptr=%p elem_offset=%lu calc_elem_offset=%lu head=%lu tail=%lu\n", get_tid(),
+			       pptr, elem_offset, element_offset(qimpl, e_impl), qimpl->head, tail);
 			return;
 		} else {
 			printf("(%d) ENQ RETRY pptr=%p head=%lu tail=%lu\n", get_tid(),
@@ -147,8 +167,8 @@ int lf_queue_dequeue(lf_queue_t *queue, lf_element_t **element)
 	lf_queue_impl_t *qimpl = queue->queue;
 	size_t head;
 	size_t tail;
+	size_t elem_offset;
 	lf_element_impl_t **ptr;
-	lf_element_impl_t *curr_ptr;
 	do {
 		head = __sync_add_and_fetch(&qimpl->head, 0);
 		tail = __sync_add_and_fetch(&qimpl->tail, 0);
@@ -156,21 +176,21 @@ int lf_queue_dequeue(lf_queue_t *queue, lf_element_t **element)
 			return ENOMEM;
 		}
 		ptr = &qimpl->ptrs[head % qimpl->n_elements];
-		curr_ptr = *ptr;
-		printf("(%d) DEQ 1 curr_ptr=%p head=%lu tail=%lu\n", get_tid(), curr_ptr, head, tail);
-		if ((uint64_t)curr_ptr <= qimpl->tail) {
-			printf("(%d) DEQ SENTINAL_VALUE curr_ptr=%p head=%lu tail=%lu\n", get_tid(), curr_ptr, head, tail);
-			// some other thread have already made the swap
+		elem_offset = (size_t)*ptr;
+		printf("(%d) DEQ 1 elem_offset=%lu head=%lu tail=%lu\n", get_tid(), elem_offset, head, tail);
+		if ((elem_offset & USED_BIT) == 0) {
+			printf("(%d) DEQ USED_BIT NOT SET, elem_offset=%lu head=%lu tail=%lu\n", get_tid(), elem_offset, head, tail);
+			// some other thread have already dequeued this element
 			continue;
 		}
-		if (__sync_bool_compare_and_swap(ptr, curr_ptr, qimpl->tail)) {
+		if (__sync_bool_compare_and_swap(ptr, elem_offset, qimpl->tail)) {
 			head = __sync_add_and_fetch(&qimpl->head, 1);
-			*element = &curr_ptr->elem;
-			printf("(%d) DEQ 2 *element=%p curr_ptr=%p head=%lu tail=%lu\n",
-			       get_tid(), *element, curr_ptr, head, tail);
+			*element = &get_element_by_offset(qimpl, elem_offset  & ~USED_BIT)->elem;
+			printf("(%d) DEQ 2 *element=%p elem_offset=%lu head=%lu tail=%lu\n",
+			       get_tid(), *element, elem_offset, head, tail);
 			return 0;
 		} else {
-			printf("(%d) DEQ RETRY curr_ptr=%p head=%lu tail=%lu\n", get_tid(), curr_ptr, head, tail);
+			printf("(%d) DEQ RETRY elem_offset=%lu head=%lu tail=%lu\n", get_tid(), elem_offset, head, tail);
 		}
 	} while (true);
 }
@@ -187,7 +207,7 @@ void lf_queue_put(lf_queue_t *queue, lf_element_t *element)
 		prev_val = __sync_val_compare_and_swap(&qimpl->free_head,
 		                                       curr_free, element_impl);
 		if (prev_val == curr_free) {
-			printf("(%d) PUT curr_free=%p element=%p\n", get_tid(), curr_free, element);
+//			printf("(%d) PUT curr_free=%p element=%p\n", get_tid(), curr_free, element);
 			// swap was successful
 			break;
 		}

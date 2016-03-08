@@ -6,7 +6,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
-#define N_ELEM 100
+#define N_ELEM 500
 
 
 void enq_dec(lf_queue_t *q)
@@ -107,6 +107,8 @@ void mt_test(void)
 	for (i = 0; i < MT_N_THREADS; ++i) {
 		pthread_join(threads[i], NULL);
 	}
+	printf("all threads finished g_enq_sum=%lu g_deq_sum=%lu\n", g_enq_sum, g_deq_sum);
+	assert(g_enq_sum == g_deq_sum);
 
 	lf_queue_destroy(&q);
 

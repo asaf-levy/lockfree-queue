@@ -14,7 +14,6 @@ typedef struct lf_element_impl lf_element_impl_t;
 typedef struct lf_element_impl {
     lf_element_t elem;
     uint32_t mod_count;
-    bool in_use;
     size_t next_desc;
     // followed by the element data
 } lf_element_impl_t;
@@ -62,8 +61,8 @@ static inline size_t elem_offset(lf_queue_impl_t *queue, lf_element_impl_t *elem
 	return (((void*)element - (void*)queue->elements)) / raw_elem_size(queue->element_size);;
 }
 
-static inline lf_element_impl_t *get_element_by_offset(lf_queue_impl_t *queue,
-                                                       size_t element_offset)
+static inline lf_element_impl_t *get_elem_by_offset(lf_queue_impl_t *queue,
+                                                    size_t element_offset)
 {
 	return (lf_element_impl_t *) ((void*)queue->elements +
 	                              (element_offset * raw_elem_size(queue->element_size)));
@@ -81,7 +80,7 @@ static inline size_t get_element_descriptor(lf_queue_impl_t *queue,
 static inline lf_element_impl_t *get_element_by_descriptor(lf_queue_impl_t *queue,
                                                            size_t element_descriptor)
 {
-	return get_element_by_offset(queue, element_descriptor & ELEMENT_OFFSET_MASK);
+	return get_elem_by_offset(queue, element_descriptor & ELEMENT_OFFSET_MASK);
 }
 
 static inline size_t get_free_list_descriptor(lf_queue_impl_t *queue,
@@ -92,7 +91,7 @@ static inline size_t get_free_list_descriptor(lf_queue_impl_t *queue,
 	return element_descriptor | elem_offset(queue, element);
 }
 
-int lf_queue_init(lf_queue_t *queue, size_t n_elements, size_t element_size)
+int lf_queue_init(lf_queue_handle_t *queue, size_t n_elements, size_t element_size)
 {
 	// TODO malloc checks
 	// TODO max queue size is 2^32
@@ -108,9 +107,9 @@ int lf_queue_init(lf_queue_t *queue, size_t n_elements, size_t element_size)
 	qimpl->head = 1;
 	qimpl->tail = 0;
 
-	assert(n_elements > 0);
-	assert(element_size > 0);
-	assert(queue != NULL);
+	if (n_elements == 0 || element_size == 0 || queue == NULL) {
+		return EINVAL;
+	}
 
 	curr = qimpl->elements;
 	for (i = 0; i < n_elements - 1; ++i) {
@@ -123,25 +122,23 @@ int lf_queue_init(lf_queue_t *queue, size_t n_elements, size_t element_size)
 	curr->mod_count = 0;
 	curr->next_desc = 0;
 	curr->elem.data = (void*)&curr->next_desc + sizeof(curr->next_desc);
+
 	qimpl->free_head = get_free_list_descriptor(qimpl, qimpl->elements);
-	queue->queue = qimpl;
+	*queue = (lf_queue_handle_t)qimpl;
 	return 0;
 }
 
-void lf_queue_destroy(lf_queue_t *queue)
+void lf_queue_destroy(lf_queue_handle_t queue)
 {
-	lf_queue_impl_t *qimpl = queue->queue;
-
-	assert(queue->queue != NULL);
+	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;;
 	free(qimpl->elements);
 	free(qimpl->ptrs);
 	free(qimpl);
-	queue->queue = NULL;
 }
 
-int lf_queue_get(lf_queue_t *queue, lf_element_t **element)
+int lf_queue_get(lf_queue_handle_t queue, lf_element_t **element)
 {
-	lf_queue_impl_t *qimpl = queue->queue;
+	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;
 	size_t curr_free = qimpl->free_head;
 	size_t prev_val;
 
@@ -161,9 +158,9 @@ int lf_queue_get(lf_queue_t *queue, lf_element_t **element)
 	return ENOMEM;
 }
 
-void lf_queue_put(lf_queue_t *queue, lf_element_t *element)
+void lf_queue_put(lf_queue_handle_t queue, lf_element_t *element)
 {
-	lf_queue_impl_t *qimpl = queue->queue;
+	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;
 	lf_element_impl_t *element_impl = container_of(element, lf_element_impl_t, elem);
 	size_t curr_free = qimpl->free_head;
 	size_t prev_val;
@@ -174,16 +171,15 @@ void lf_queue_put(lf_queue_t *queue, lf_element_t *element)
 		                                       curr_free, get_free_list_descriptor(qimpl, element_impl));
 		if (prev_val == curr_free) {
 //			PRINT("(%d) PUT curr_free=%p element=%p\n", get_tid(), curr_free, element);
-			// swap was successful
 			break;
 		}
 		curr_free = prev_val;
 	} while (true);
 }
 
-void lf_queue_enqueue(lf_queue_t *queue, lf_element_t *element)
+void lf_queue_enqueue(lf_queue_handle_t queue, lf_element_t *element)
 {
-	lf_queue_impl_t *qimpl = queue->queue;
+	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;
 	lf_element_impl_t *e_impl = container_of(element, lf_element_impl_t, elem);
 //	size_t prev_head;
 //	size_t prev_tail;
@@ -193,6 +189,7 @@ void lf_queue_enqueue(lf_queue_t *queue, lf_element_t *element)
 
 	do {
 		tail = __sync_add_and_fetch(&qimpl->tail, 0);
+//		tail = qimpl->tail;
 //		prev_tail = tail;
 		pptr = &qimpl->ptrs[(tail + 1) % qimpl->n_elements];
 		elem_desc = (size_t)*pptr;
@@ -200,17 +197,23 @@ void lf_queue_enqueue(lf_queue_t *queue, lf_element_t *element)
 //		PRINT("(%d) ENQ 1 pptr=%p element_descriptor=%lx head=%lu tail=%lu\n", get_tid(),
 //		       pptr, elem_desc, qimpl->head, tail);
 		if ((elem_desc & USED_BIT)) {
+			// this slot is already in use, some other thread won the
+			// race to enqueue it
 			PRINT("(%d) ENQ SLOT-TAKEN pptr=%p elem_desc=%lx head=%lu tail=%lu\n", get_tid(),
 			       pptr, elem_desc, qimpl->head, tail);
 			continue;
 		}
 		if ((elem_desc & ~USED_BIT) && ((elem_desc & ~USED_BIT) > tail)) {
+			// this slot is free, but the value this thread think tail
+			// has is outdated meaning that some other thread(s) have
+			// already enqueued and dequeued this slot since we got
+			// the value of tail
 			PRINT("(%d) ENQ TAIL-UPDATED pptr=%p head=%lu tail=%lu\n", get_tid(),
 			       pptr, qimpl->head, tail);
 			continue;
 		}
-		if (__sync_bool_compare_and_swap(pptr, elem_desc, USED_BIT |
-		                                                  get_element_descriptor(qimpl, e_impl))) {
+		if (__sync_bool_compare_and_swap(pptr, elem_desc,
+		                                 USED_BIT | get_element_descriptor(qimpl, e_impl))) {
 			// one could claim since tail always advances there is the
 			// risk of a wraparound. However this is not a practical
 			// concern since even if you add a new item to the queue
@@ -228,18 +231,17 @@ void lf_queue_enqueue(lf_queue_t *queue, lf_element_t *element)
 	} while (true);
 }
 
-int lf_queue_dequeue(lf_queue_t *queue, lf_element_t **element)
+int lf_queue_dequeue(lf_queue_handle_t queue, lf_element_t **element)
 {
-	lf_queue_impl_t *qimpl = queue->queue;
+	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;
 	size_t head;
-	size_t prev_head;
 	size_t tail;
 	size_t elem_desc;
 	int64_t desc_queue_gen;
 	int64_t current_queue_gen;
 	lf_element_impl_t **ptr;
 	do {
-		prev_head = head = __sync_add_and_fetch(&qimpl->head, 0);
+		head = __sync_add_and_fetch(&qimpl->head, 0);
 		tail = __sync_add_and_fetch(&qimpl->tail, 0);
 		if (head > tail) {
 			return ENOMEM;
@@ -263,12 +265,7 @@ int lf_queue_dequeue(lf_queue_t *queue, lf_element_t **element)
 			continue;
 		}
 		if (__sync_bool_compare_and_swap(ptr, elem_desc, tail)) {
-			head = __sync_add_and_fetch(&qimpl->head, 1);
-			if ((head - prev_head >= qimpl->n_elements)) {
-				PRINT("(%d) DEQ QUEUE ROTATED desc_queue_gen=%lu current_queue_gen=%lu *element=%p element_descriptor=%lx prev_head=%lu head=%lu tail=%lu\n",
-				      get_tid(), desc_queue_gen, current_queue_gen, *element, elem_desc, prev_head, head, tail);
-				assert(0);
-			}
+			__sync_add_and_fetch(&qimpl->head, 1);
 			*element = &get_element_by_descriptor(qimpl, elem_desc & ~USED_BIT)->elem;
 //			PRINT("(%d) DEQ 2 *element=%p element_descriptor=%lx desc_queue_gen=%lu prev_head=%lu head=%lu tail=%lu\n",
 //			      get_tid(), *element, elem_desc, desc_queue_gen, prev_head, head, tail);

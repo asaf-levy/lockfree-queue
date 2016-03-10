@@ -6,8 +6,9 @@
 #include <pthread.h>
 #include <unistd.h>
 
-#define N_ELEM 500
-
+#define N_ELEM 40000
+#define MT_N_ITER 1000000
+#define MT_N_THREADS 128
 
 void enq_dec(lf_queue_t *q)
 {
@@ -58,9 +59,6 @@ void serial_test(void)
 uint64_t g_enq_sum = 0;
 uint64_t g_deq_sum = 0;
 
-#define MT_N_ELEM 100000
-#define MT_N_THREADS 2
-
 void *enq_dec_task(void *arg)
 {
 	lf_queue_t *q = arg;
@@ -69,7 +67,10 @@ void *enq_dec_task(void *arg)
 	int *val;
 	lf_element_t *e;
 
-	for (i = 0; i < MT_N_ELEM; ++i) {
+	for (i = 0; i < MT_N_ITER; ++i) {
+		if (i % 100000 == 0) {
+			fprintf(stderr, "Iteration %d\n", i);
+		}
 		err = lf_queue_get(q, &e);
 		if (err == 0) {
 			val = e->data;
@@ -116,7 +117,7 @@ void mt_test(void)
 
 int main(void)
 {
-//	serial_test();
+	serial_test();
 	mt_test();
 	return 0;
 }

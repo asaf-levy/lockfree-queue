@@ -14,7 +14,16 @@ typedef struct lf_element {
     void *data;
 } lf_element_t;
 
+// return the amount of memory required for a queue
+size_t lf_queue_get_required_memory(size_t n_elements, size_t element_size);
+
+// init the lock free queue from a pre allocated chunk of memory
+int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements, size_t element_size);
+// allocates memory and init the lock free queue
 int lf_queue_init(lf_queue_handle_t *queue, size_t n_elements, size_t element_size);
+// attach to an already initialized queue on the specified memory ptr
+int lf_queue_attach(lf_queue_handle_t *queue, void *mem);
+// destory the queue and deallocate its memory
 void lf_queue_destroy(lf_queue_handle_t queue);
 
 // get an element from the queue that to be later on queued by calling lf_queue_enqueue

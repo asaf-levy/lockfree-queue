@@ -2,25 +2,25 @@
 
 #include <malloc.h>
 #include <errno.h>
-#include <assert.h>
 #include <stdbool.h>
 #include <syscall.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <stdint.h>
+#include <string.h>
 
 typedef struct lf_element_impl lf_element_impl_t;
+typedef uint64_t element_descriptor_t;
 
 typedef struct lf_element_impl {
     lf_element_t elem;
     uint32_t mod_count;
-    size_t next_desc;
+    element_descriptor_t next_desc;
     // followed by the element data
 } lf_element_impl_t;
 
 typedef struct lf_queue_impl {
     lf_element_impl_t *elements;
-    lf_element_impl_t **ptrs;
+    element_descriptor_t *element_descriptors;
     size_t n_elements;
     size_t element_size;
     // TODO multiple free lists
@@ -91,19 +91,40 @@ static inline size_t get_free_list_descriptor(lf_queue_impl_t *queue,
 	return element_descriptor | elem_offset(queue, element);
 }
 
+size_t lf_queue_get_required_memory(size_t n_elements, size_t element_size)
+{
+	return sizeof(lf_queue_impl_t) + (n_elements * raw_elem_size(element_size))
+		+ (n_elements * sizeof(element_descriptor_t));
+}
+
 int lf_queue_init(lf_queue_handle_t *queue, size_t n_elements, size_t element_size)
 {
-	// TODO malloc checks
 	// TODO max queue size is 2^32
+	int err;
+	void *buff = malloc(lf_queue_get_required_memory(n_elements, element_size));
+	if (!buff) {
+		return ENOMEM;
+	}
+	err = lf_queue_mem_init(queue, buff, n_elements, element_size);
+	if (err) {
+		free(buff);
+	}
+	return err;
+}
+
+int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements,
+                      size_t element_size)
+{
 	size_t i;
 	lf_element_impl_t *curr;
 	lf_element_impl_t *next;
-	lf_queue_impl_t *qimpl = malloc(sizeof(lf_queue_impl_t));
+	lf_queue_impl_t *qimpl = mem;
 	qimpl->n_elements = n_elements;
 	qimpl->element_size = element_size;
-	qimpl->elements = calloc(n_elements, raw_elem_size(element_size));
-	// we count on calloc setting the memory to zero
-	qimpl->ptrs = calloc(n_elements, sizeof(lf_queue_impl_t*));
+	qimpl->elements = (lf_element_impl_t *)((char*)qimpl + sizeof(* qimpl));
+	qimpl->element_descriptors = (element_descriptor_t *) (
+		(char*)qimpl->elements + (n_elements * raw_elem_size(element_size)));
+	memset(qimpl->element_descriptors, 0, n_elements * sizeof(element_descriptor_t));
 	qimpl->head = 1;
 	qimpl->tail = 0;
 
@@ -131,8 +152,6 @@ int lf_queue_init(lf_queue_handle_t *queue, size_t n_elements, size_t element_si
 void lf_queue_destroy(lf_queue_handle_t queue)
 {
 	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;;
-	free(qimpl->elements);
-	free(qimpl->ptrs);
 	free(qimpl);
 }
 
@@ -184,23 +203,23 @@ void lf_queue_enqueue(lf_queue_handle_t queue, lf_element_t *element)
 //	size_t prev_head;
 //	size_t prev_tail;
 	size_t tail;
-	lf_element_impl_t **pptr;
-	size_t elem_desc;
+	element_descriptor_t *desc_ptr;
+	element_descriptor_t elem_desc;
 
 	do {
 		tail = __sync_add_and_fetch(&qimpl->tail, 0);
 //		tail = qimpl->tail;
 //		prev_tail = tail;
-		pptr = &qimpl->ptrs[(tail + 1) % qimpl->n_elements];
-		elem_desc = (size_t)*pptr;
+		desc_ptr = &qimpl->element_descriptors[(tail + 1) % qimpl->n_elements];
+		elem_desc = *desc_ptr;
 //		prev_head = qimpl->head;
-//		PRINT("(%d) ENQ 1 pptr=%p element_descriptor=%lx head=%lu tail=%lu\n", get_tid(),
-//		       pptr, elem_desc, qimpl->head, tail);
+//		PRINT("(%d) ENQ 1 desc_ptr=%p element_descriptor=%lx head=%lu tail=%lu\n", get_tid(),
+//		       desc_ptr, elem_desc, qimpl->head, tail);
 		if ((elem_desc & USED_BIT)) {
 			// this slot is already in use, some other thread won the
 			// race to enqueue it
-			PRINT("(%d) ENQ SLOT-TAKEN pptr=%p elem_desc=%lx head=%lu tail=%lu\n", get_tid(),
-			       pptr, elem_desc, qimpl->head, tail);
+			PRINT("(%d) ENQ SLOT-TAKEN desc_ptr=%p elem_desc=%lx head=%lu tail=%lu\n", get_tid(),
+			      desc_ptr, elem_desc, qimpl->head, tail);
 			continue;
 		}
 		if ((elem_desc & ~USED_BIT) && ((elem_desc & ~USED_BIT) > tail)) {
@@ -208,11 +227,11 @@ void lf_queue_enqueue(lf_queue_handle_t queue, lf_element_t *element)
 			// has is outdated meaning that some other thread(s) have
 			// already enqueued and dequeued this slot since we got
 			// the value of tail
-			PRINT("(%d) ENQ TAIL-UPDATED pptr=%p head=%lu tail=%lu\n", get_tid(),
-			       pptr, qimpl->head, tail);
+			PRINT("(%d) ENQ TAIL-UPDATED desc_ptr=%p head=%lu tail=%lu\n", get_tid(),
+			      desc_ptr, qimpl->head, tail);
 			continue;
 		}
-		if (__sync_bool_compare_and_swap(pptr, elem_desc,
+		if (__sync_bool_compare_and_swap(desc_ptr, elem_desc,
 		                                 USED_BIT | get_element_descriptor(qimpl, e_impl))) {
 			// one could claim since tail always advances there is the
 			// risk of a wraparound. However this is not a practical
@@ -220,13 +239,13 @@ void lf_queue_enqueue(lf_queue_handle_t queue, lf_element_t *element)
 			// every nano sec it would still take ~584 years for 64 bits
 			// to wrap.
 			tail = __sync_add_and_fetch(&qimpl->tail, 1);
-//			PRINT("(%d) ENQ 2 pptr=%p element_descriptor=%lu calc_element_descriptor=%lx prev_head=%lu head=%lu prev_tail=%lu tail=%lu\n", get_tid(),
-//			       pptr, elem_desc,
+//			PRINT("(%d) ENQ 2 desc_ptr=%p element_descriptor=%lu calc_element_descriptor=%lx prev_head=%lu head=%lu prev_tail=%lu tail=%lu\n", get_tid(),
+//			       desc_ptr, elem_desc,
 //			       get_element_descriptor(qimpl, e_impl), prev_head, qimpl->head, prev_tail, tail);
 			return;
 		} else {
-			PRINT("(%d) ENQ RETRY pptr=%p head=%lu tail=%lu\n", get_tid(),
-			       pptr, qimpl->head, tail);
+			PRINT("(%d) ENQ RETRY desc_ptr=%p head=%lu tail=%lu\n", get_tid(),
+			      desc_ptr, qimpl->head, tail);
 		}
 	} while (true);
 }
@@ -236,18 +255,18 @@ int lf_queue_dequeue(lf_queue_handle_t queue, lf_element_t **element)
 	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;
 	size_t head;
 	size_t tail;
-	size_t elem_desc;
+	element_descriptor_t elem_desc;
 	int64_t desc_queue_gen;
 	int64_t current_queue_gen;
-	lf_element_impl_t **ptr;
+	element_descriptor_t *desc_ptr;
 	do {
 		head = __sync_add_and_fetch(&qimpl->head, 0);
 		tail = __sync_add_and_fetch(&qimpl->tail, 0);
 		if (head > tail) {
 			return ENOMEM;
 		}
-		ptr = &qimpl->ptrs[head % qimpl->n_elements];
-		elem_desc = (size_t)*ptr;
+		desc_ptr = &qimpl->element_descriptors[head % qimpl->n_elements];
+		elem_desc = *desc_ptr;
 		desc_queue_gen = (int64_t) ((elem_desc & QUEUE_GEN_MASK) >> 32);
 		current_queue_gen = (int64_t) ((head / qimpl->n_elements) & 0xffffffff);
 		if (desc_queue_gen - current_queue_gen > 0 && desc_queue_gen - current_queue_gen < 0x0fffff) {
@@ -264,7 +283,7 @@ int lf_queue_dequeue(lf_queue_handle_t queue, lf_element_t **element)
 			// some other thread have already dequeued this element
 			continue;
 		}
-		if (__sync_bool_compare_and_swap(ptr, elem_desc, tail)) {
+		if (__sync_bool_compare_and_swap(desc_ptr, elem_desc, tail)) {
 			__sync_add_and_fetch(&qimpl->head, 1);
 			*element = &get_element_by_descriptor(qimpl, elem_desc & ~USED_BIT)->elem;
 //			PRINT("(%d) DEQ 2 *element=%p element_descriptor=%lx desc_queue_gen=%lu prev_head=%lu head=%lu tail=%lu\n",

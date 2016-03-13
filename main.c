@@ -5,9 +5,9 @@
 #include <stdint.h>
 #include <pthread.h>
 
-#define N_ELEM 1024
+#define N_ELEM 1000
 #define N_ITER 1000000
-#define N_THREADS 4
+#define N_THREADS 9
 
 void enq_dec(lf_queue_handle_t q)
 {
@@ -70,9 +70,9 @@ void *enq_dec_task(void *arg)
 	struct timespec end;
 	clock_gettime(CLOCK_REALTIME, &start);
 	for (i = 0; i < N_ITER; ++i) {
-//		if (i % 100000 == 0) {
-//			fprintf(stderr, "Iteration %d\n", i);
-//		}
+		if (i % 100000 == 0) {
+			fprintf(stderr, "Iteration %d\n", i);
+		}
 		err = lf_queue_get(q, &e);
 		if (err == 0) {
 			val = e->data;
@@ -103,9 +103,9 @@ void *dec_task(void *arg)
 	lf_element_t *e;
 
 	for (i = 0; i < N_ITER; ++i) {
-//		if (i % 100000 == 0) {
-//			fprintf(stderr, "Iteration %d\n", i);
-//		}
+		if (i % 100000 == 0) {
+			fprintf(stderr, "Iteration %d\n", i);
+		}
 
 		err =  lf_queue_dequeue(q, &e);
 		if (err == 0) {
@@ -126,9 +126,9 @@ void *enq_task(void *arg)
 	lf_element_t *e;
 
 	for (i = 0; i < N_ITER; ++i) {
-//		if (i % 100000 == 0) {
-//			fprintf(stderr, "Iteration %d\n", i);
-//		}
+		if (i % 100000 == 0) {
+			fprintf(stderr, "Iteration %d\n", i);
+		}
 		err = lf_queue_get(q, &e);
 		if (err == 0) {
 			val = e->data;

@@ -27,6 +27,7 @@ typedef struct lf_queue_impl {
     element_descriptor_t free_head;
     size_t head;
     size_t tail;
+    bool should_free;
 } lf_queue_impl_t;
 
 __thread pid_t g_tid = 0;
@@ -101,6 +102,7 @@ int lf_queue_init(lf_queue_handle_t *queue, size_t n_elements, size_t element_si
 {
 	// TODO max queue size is 2^32
 	int err;
+	lf_queue_impl_t *qimpl;
 	void *buff = malloc(lf_queue_get_required_memory(n_elements, element_size));
 	if (!buff) {
 		return ENOMEM;
@@ -109,6 +111,9 @@ int lf_queue_init(lf_queue_handle_t *queue, size_t n_elements, size_t element_si
 	if (err) {
 		free(buff);
 	}
+	qimpl = (lf_queue_impl_t *)queue;
+	qimpl->should_free = true;
+
 	return err;
 }
 
@@ -127,6 +132,7 @@ int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements,
 	memset(qimpl->element_descriptors, 0, n_elements * sizeof(element_descriptor_t));
 	qimpl->head = 1;
 	qimpl->tail = 0;
+	qimpl->should_free = false;
 
 	if (n_elements == 0 || element_size == 0 || queue == NULL) {
 		return EINVAL;
@@ -157,9 +163,10 @@ int lf_queue_attach(lf_queue_handle_t *queue, void *mem)
 
 void lf_queue_destroy(lf_queue_handle_t queue)
 {
-	// TODO avoid the free in case of mem init
 	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;;
-	free(qimpl);
+	if (qimpl->should_free) {
+		free(qimpl);
+	}
 }
 
 int lf_queue_get(lf_queue_handle_t queue, lf_element_t **element)

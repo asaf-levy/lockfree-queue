@@ -240,6 +240,7 @@ void shm_test(void)
 		// the expected sum is the sum of the arithmetic progression
 		// from 1 to N_ITER
 		assert(g_deq_sum == ((uint64_t)N_ITER * (N_ITER - 1) / 2));
+		lf_queue_destroy(queue);
 		err = munmap(rptr, mem_size);
 		assert(err == 0);
 		waitpid(pid, NULL, 0);

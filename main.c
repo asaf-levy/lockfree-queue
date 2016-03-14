@@ -2,12 +2,19 @@
 #include <stdio.h>
 #include <assert.h>
 #include <errno.h>
-#include <stdint.h>
+#include <unistd.h>
+#include <sys/mman.h>
 #include <pthread.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <stdbool.h>
 
 #define N_ELEM 1000
 #define N_ITER 1000000
 #define N_THREADS 9
+#define SHM_NAME "/shm_name"
 
 void enq_dec(lf_queue_handle_t q)
 {
@@ -70,9 +77,9 @@ void *enq_dec_task(void *arg)
 	struct timespec end;
 	clock_gettime(CLOCK_REALTIME, &start);
 	for (i = 0; i < N_ITER; ++i) {
-		if (i % 100000 == 0) {
-			fprintf(stderr, "Iteration %d\n", i);
-		}
+//		if (i % 10000 == 0) {
+//			fprintf(stderr, "Iteration %d\n", i);
+//		}
 		err = lf_queue_get(q, &e);
 		if (err == 0) {
 			val = e->data;
@@ -94,49 +101,68 @@ void *enq_dec_task(void *arg)
 	return 0;
 }
 
-void *dec_task(void *arg)
+void dec(lf_queue_handle_t q, bool block)
 {
-	lf_queue_handle_t q = (lf_queue_handle_t)arg;
 	int i;
-	int err;
 	int *val;
 	lf_element_t *e;
+	int res;
 
 	for (i = 0; i < N_ITER; ++i) {
-		if (i % 100000 == 0) {
-			fprintf(stderr, "Iteration %d\n", i);
-		}
-
-		err =  lf_queue_dequeue(q, &e);
-		if (err == 0) {
+//		if (i % 100000 == 0) {
+//			fprintf(stderr, "Iteration %d\n", i);
+//		}
+		do {
+			res = lf_queue_dequeue(q, &e);
+			if (res == 0) {
+				break;
+			}
+		} while(block);
+		if (res == 0) {
 			val = e->data;
 			__sync_add_and_fetch(&g_deq_sum, *val);
 			lf_queue_put(q, e);
 		}
 	}
+}
+
+void *dec_task(void *arg)
+{
+	lf_queue_handle_t q = (lf_queue_handle_t)arg;
+	dec(q, false);
 	return 0;
 }
 
-void *enq_task(void *arg)
+void enq(lf_queue_handle_t q, bool block)
 {
-	lf_queue_handle_t q = (lf_queue_handle_t)arg;
 	int i;
-	int err;
 	int *val;
 	lf_element_t *e;
+	int res = 0;
 
 	for (i = 0; i < N_ITER; ++i) {
-		if (i % 100000 == 0) {
-			fprintf(stderr, "Iteration %d\n", i);
-		}
-		err = lf_queue_get(q, &e);
-		if (err == 0) {
+//		if (i % 100000 == 0) {
+//			fprintf(stderr, "Iteration %d\n", i);
+//		}
+		do {
+			res = lf_queue_get(q, &e);
+			if (res == 0) {
+				break;
+			}
+		} while(block);
+		if (res == 0) {
 			val = e->data;
 			*val = i;
 			lf_queue_enqueue(q, e);
 			__sync_add_and_fetch(&g_enq_sum, i);
 		}
 	}
+}
+
+void *enq_task(void *arg)
+{
+	lf_queue_handle_t q = (lf_queue_handle_t)arg;
+	enq(q, false);
 	return 0;
 }
 
@@ -171,7 +197,7 @@ void mt_test(void)
 	for (i = 0; i < N_THREADS; ++i) {
 		pthread_join(threads[i], NULL);
 	}
-	dec_task((void *) q);
+	dec(q, false);
 	clock_gettime(CLOCK_REALTIME, &end);
 
 	printf("all threads finished g_enq_sum=%lu g_deq_sum=%lu\n", g_enq_sum, g_deq_sum);
@@ -183,9 +209,55 @@ void mt_test(void)
 
 }
 
+void shm_test(void)
+{
+	int err;
+	void *rptr;
+	size_t mem_size;
+	int pid;
+	int fd;
+	lf_queue_handle_t queue;
+
+	mem_size = lf_queue_get_required_memory(N_ELEM, sizeof(int));
+	pid = fork();
+	if (pid == 0) { // child
+		sleep(1);
+		fd = shm_open(SHM_NAME, O_RDWR, S_IRUSR | S_IWUSR);
+		assert(fd >= 0);
+		rptr = mmap(NULL, mem_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+		assert(rptr != MAP_FAILED);
+		err = lf_queue_attach(&queue, rptr);
+		assert(err == 0);
+		enq(queue, true);
+		err = munmap(rptr, mem_size);
+		assert(err == 0);
+	} else { // parent
+		fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+		assert(fd >= 0);
+
+		err = ftruncate(fd, mem_size);
+		assert(err == 0);
+		rptr = mmap(NULL, mem_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+		assert(rptr != MAP_FAILED);
+		err = lf_queue_mem_init(&queue, rptr, N_ELEM, sizeof(int));
+		assert(err == 0);
+		g_deq_sum = 0;
+		dec(queue, true);
+		// the expected sum is the sum of the arithmetic progression
+		// from 1 to N_ITER
+		assert(g_deq_sum == ((uint64_t)N_ITER * (N_ITER - 1) / 2));
+		err = munmap(rptr, mem_size);
+		assert(err == 0);
+		waitpid(pid, NULL, 0);
+		err = shm_unlink(SHM_NAME);
+		assert(err == 0);
+	}
+}
+
 int main(void)
 {
 	serial_test();
 	mt_test();
+	shm_test();
 	return 0;
 }

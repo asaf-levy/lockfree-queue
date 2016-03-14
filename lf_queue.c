@@ -24,7 +24,7 @@ typedef struct lf_queue_impl {
     size_t n_elements;
     size_t element_size;
     // TODO multiple free lists
-    size_t free_head;
+    element_descriptor_t free_head;
     size_t head;
     size_t tail;
 } lf_queue_impl_t;
@@ -149,8 +149,15 @@ int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements,
 	return 0;
 }
 
+int lf_queue_attach(lf_queue_handle_t *queue, void *mem)
+{
+	*queue = (lf_queue_handle_t)mem;
+	return 0;
+}
+
 void lf_queue_destroy(lf_queue_handle_t queue)
 {
+	// TODO avoid the free in case of mem init
 	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;;
 	free(qimpl);
 }
@@ -158,8 +165,8 @@ void lf_queue_destroy(lf_queue_handle_t queue)
 int lf_queue_get(lf_queue_handle_t queue, lf_element_t **element)
 {
 	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;
-	size_t curr_free = qimpl->free_head;
-	size_t prev_val;
+	element_descriptor_t curr_free = qimpl->free_head;
+	element_descriptor_t prev_val;
 
 	while (curr_free != 0) {
 		lf_element_impl_t *eimpl = get_element_by_descriptor(qimpl, curr_free);
@@ -181,8 +188,8 @@ void lf_queue_put(lf_queue_handle_t queue, lf_element_t *element)
 {
 	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;
 	lf_element_impl_t *element_impl = container_of(element, lf_element_impl_t, elem);
-	size_t curr_free = qimpl->free_head;
-	size_t prev_val;
+	element_descriptor_t curr_free = qimpl->free_head;
+	element_descriptor_t prev_val;
 
 	do {
 		element_impl->next_desc = curr_free;

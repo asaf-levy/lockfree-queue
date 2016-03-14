@@ -73,9 +73,6 @@ void *enq_dec_task(void *arg)
 	int *val;
 	lf_element_t *e;
 
-	struct timespec start;
-	struct timespec end;
-	clock_gettime(CLOCK_REALTIME, &start);
 	for (i = 0; i < N_ITER; ++i) {
 //		if (i % 10000 == 0) {
 //			fprintf(stderr, "Iteration %d\n", i);
@@ -95,9 +92,6 @@ void *enq_dec_task(void *arg)
 			lf_queue_put(q, e);
 		}
 	}
-	clock_gettime(CLOCK_REALTIME, &end);
-	printf("thread done sec=%lu msec=%lu\n", end.tv_sec - start.tv_sec,
-	       (end.tv_nsec - start.tv_nsec) / 1000000);
 	return 0;
 }
 

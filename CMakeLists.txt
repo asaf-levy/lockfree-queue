@@ -3,7 +3,6 @@ project(lockfree_queue)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
-
 macro(add_flags var)
     string(REPLACE ";" " " _flags "${ARGN}")
     set(${var} "${${var}} ${_flags}")
@@ -11,12 +10,9 @@ endmacro(add_flags)
 
 find_package(Threads REQUIRED)
 
-set(COMMON_FLAGS -Wall -Wextra -Werror -Wformat=2 -Wundef
-        -Werror-implicit-function-declaration -Wno-unused-parameter
-        -D_GNU_SOURCE -Og -g)
-add_flags(CMAKE_C_FLAGS ${COMMON_FLAGS} -Wstrict-prototypes
-        -Wdeclaration-after-statement -Wno-tautological-compare)
+add_flags(CMAKE_C_FLAGS -Wall -Wextra -Werror -Wformat=2 -Wundef
+        -Werror-implicit-function-declaration -Wno-unused-parameter -D_GNU_SOURCE
+        -O3 -g -Wstrict-prototypes -Wdeclaration-after-statement -Wno-tautological-compare)
 
-set(SOURCE_FILES main.c lf_queue.c)
-add_executable(lf_queue_test ${SOURCE_FILES})
-target_link_libraries(lf_queue_test ${CMAKE_THREAD_LIBS_INIT} rt)
+add_subdirectory(src)
+include(CTest)

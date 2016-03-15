@@ -19,6 +19,7 @@ size_t lf_queue_get_required_memory(size_t n_elements, size_t element_size);
 
 // init the lock free queue from a pre allocated chunk of memory
 // can be used in order to initialized the queue on a shared memory segment
+// The maximal value of n_elements is 2^32
 int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements, size_t element_size);
 // allocates memory and init the lock free queue
 int lf_queue_init(lf_queue_handle_t *queue, size_t n_elements, size_t element_size);

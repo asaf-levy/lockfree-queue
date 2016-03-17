@@ -11,7 +11,7 @@
 typedef struct lf_element_impl lf_element_impl_t;
 typedef uint64_t element_descriptor_t;
 
-typedef struct lf_element_impl {
+typedef struct __attribute__((packed)) lf_element_impl {
     lf_element_t elem;
     uint32_t mod_count;
     // followed by the element data
@@ -53,11 +53,11 @@ pid_t get_tid(void)
 
 static inline size_t get_min_element_size(size_t element_size)
 {
-	if (element_size < 8) {
+	if (element_size < sizeof(element_descriptor_t)) {
 		// when the element is in the free list we use the element data
 		// to store the element_descriptor of the next element in the
 		// free list
-		element_size = 8;
+		return sizeof(element_descriptor_t);
 	}
 	return element_size;
 }
@@ -95,8 +95,8 @@ static inline lf_element_impl_t *get_element_by_descriptor(lf_queue_impl_t *queu
 	return get_elem_by_offset(queue, element_descriptor & ELEMENT_OFFSET_MASK);
 }
 
-static inline size_t get_free_list_descriptor(lf_queue_impl_t *queue,
-                                              lf_element_impl_t *element)
+static inline element_descriptor_t get_free_list_descriptor(lf_queue_impl_t *queue,
+                                                            lf_element_impl_t *element)
 {
 	size_t mod_count = element->mod_count;
 	size_t element_descriptor = mod_count << 32;
@@ -130,7 +130,7 @@ int lf_queue_init(lf_queue_handle_t *queue, size_t n_elements, size_t element_si
 	if (err) {
 		free(buff);
 	}
-	qimpl = (lf_queue_impl_t *)queue;
+	qimpl = (lf_queue_impl_t *)*queue;
 	qimpl->should_free = true;
 
 	return err;
@@ -160,13 +160,14 @@ int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements,
 	qimpl->should_free = false;
 
 	curr = qimpl->elements;
+	curr->mod_count = 1;
 	for (i = 0; i < n_elements; ++i) {
-		curr->mod_count = 1;
 		next = (lf_element_impl_t *)((char*)curr + raw_elem_size(element_size));
 		curr->elem.data = (void*)&curr->mod_count + sizeof(curr->mod_count);
 		if (i == n_elements - 1) {
 			*(element_descriptor_t *)curr->elem.data = 0;
 		} else {
+			next->mod_count = 1;
 			*(element_descriptor_t *) curr->elem.data = get_free_list_descriptor(
 				qimpl, next);
 		}
@@ -186,7 +187,7 @@ int lf_queue_attach(lf_queue_handle_t *queue, void *mem)
 
 void lf_queue_destroy(lf_queue_handle_t queue)
 {
-	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;;
+	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;
 	if (qimpl->should_free) {
 		free(qimpl);
 	}
@@ -195,9 +196,10 @@ void lf_queue_destroy(lf_queue_handle_t queue)
 int lf_queue_get(lf_queue_handle_t queue, lf_element_t **element)
 {
 	lf_queue_impl_t *qimpl = (lf_queue_impl_t *)queue;
-	element_descriptor_t curr_free = qimpl->free_head;
+	element_descriptor_t curr_free = 0;
 	element_descriptor_t prev_val;
 
+	curr_free = qimpl->free_head;
 	while (curr_free != 0) {
 		lf_element_impl_t *eimpl = get_element_by_descriptor(qimpl, curr_free);
 		element_descriptor_t next_desc = *(element_descriptor_t*)eimpl->elem.data;

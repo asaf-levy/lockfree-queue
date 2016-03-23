@@ -1,6 +1,6 @@
-include_directories(include)
+include_directories(${PROJECT_SOURCE_DIR}/src/include)
 
-set(SOURCE_FILES lf_queue.c)
+set(SOURCE_FILES lf_queue.c lf_shm_queue.c)
 add_library(lf_queue SHARED ${SOURCE_FILES})
 
 install(TARGETS lf_queue

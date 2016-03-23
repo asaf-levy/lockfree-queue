@@ -1,6 +1,6 @@
 include_directories(${PROJECT_SOURCE_DIR}/src/include)
 
-    enable_testing()
+enable_testing()
 
 set(SOURCE_FILES lf_queue_test.c)
 add_executable(lf_queue_test ${SOURCE_FILES})

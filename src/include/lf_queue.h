@@ -8,7 +8,9 @@
 extern "C" {
 #endif
 
-typedef uint64_t lf_queue_handle_t;
+typedef struct lf_queue_handle {
+    void *handle;
+} lf_queue_handle_t;
 
 typedef struct lf_element {
     void *data;
@@ -20,14 +22,14 @@ size_t lf_queue_get_required_memory(size_t n_elements, size_t element_size);
 // init the lock free queue from a pre allocated chunk of memory
 // can be used in order to initialized the queue on a shared memory segment
 // The maximal value of n_elements is 2^32
-int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements, size_t element_size);
+int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements,
+                      size_t element_size);
 // allocates memory and init the lock free queue
 int lf_queue_init(lf_queue_handle_t *queue, size_t n_elements, size_t element_size);
 // attach to an already initialized queue on the specified memory ptr
 int lf_queue_attach(lf_queue_handle_t *queue, void *mem);
 // destroy the queue and deallocate its memory
 void lf_queue_destroy(lf_queue_handle_t queue);
-
 // get an element from the queue that to be later on queued by calling lf_queue_enqueue
 // will fail with ENOMEM in case all of the elements in the queue are already in use
 int lf_queue_get(lf_queue_handle_t queue, lf_element_t **element);

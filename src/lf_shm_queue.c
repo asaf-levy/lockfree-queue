@@ -64,7 +64,7 @@ int lf_shm_queue_init(lf_shm_queue_handle_t *queue, const char *shm_name,
 		printf("lf_queue_mem_init failed err=%d\n", res);
 		return res;
 	}
-	*queue = (lf_shm_queue_handle_t)qimpl;
+	queue->handle = qimpl;
 	return 0;
 }
 
@@ -105,18 +105,16 @@ int lf_shm_queue_attach(lf_shm_queue_handle_t *queue, const char *shm_name,
 		return res;
 	}
 
-	*queue = (lf_shm_queue_handle_t)qimpl;
+	queue->handle = qimpl;
 	return 0;
 }
 
 int lf_shm_queue_destroy(lf_shm_queue_handle_t queue)
 {
 	int res;
-
-	lf_shm_queue_impl_t *qimpl = (lf_shm_queue_impl_t *)queue;
+	lf_shm_queue_impl_t *qimpl = queue.handle;
 
 	lf_queue_destroy(qimpl->lf_queue);
-
 	res = munmap(qimpl->shm_ptr, qimpl->mem_size);
 	if (res != 0) {
 		printf("munmap failed err=%d\n", errno);
@@ -133,6 +131,6 @@ int lf_shm_queue_destroy(lf_shm_queue_handle_t queue)
 
 lf_queue_handle_t lf_shm_queue_get_underlying_handle(lf_shm_queue_handle_t queue)
 {
-	lf_shm_queue_impl_t *qimpl = (lf_shm_queue_impl_t *)queue;
+	lf_shm_queue_impl_t *qimpl = queue.handle;
 	return qimpl->lf_queue;
 }

@@ -23,7 +23,6 @@ typedef struct lf_queue_impl {
     uint64_t magic;
     size_t n_elements;
     size_t element_size;
-    // TODO multiple free lists
     element_descriptor_t free_head;
     size_t head;
     size_t tail;
@@ -48,7 +47,7 @@ pid_t get_tid(void)
 #endif
 
 #define container_of(ptr, container, member) \
-	((container *)((char *)ptr - offsetof(container, member)))
+	((container *)((void *)ptr - offsetof(container, member)))
 #define USED_BIT                0x8000000000000000
 #define ELEMENT_OFFSET_MASK     0x00000000ffffffff
 #define QUEUE_GEN_MASK          0x7fffffff00000000
@@ -178,7 +177,7 @@ int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements,
 	curr = elements_start(qimpl);
 	curr->mod_count = 1;
 	for (i = 0; i < n_elements; ++i) {
-		next = (lf_element_impl_t *)((char*)curr + raw_elem_size(element_size));
+		next = (lf_element_impl_t *)((void *)curr + raw_elem_size(element_size));
 		curr->elem.data = (void*)&curr->mod_count + sizeof(curr->mod_count);
 		if (i == n_elements - 1) {
 			*(element_descriptor_t *)curr->elem.data = 0;

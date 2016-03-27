@@ -12,9 +12,9 @@
 #include <stdbool.h>
 #include <lf_shm_queue.h>
 
-#define N_ELEM 10000
-#define N_ITER 1000000
-#define N_THREADS 9
+#define N_ELEM 4
+#define N_ITER 100000
+#define N_THREADS 32
 #define SHM_NAME "/shm_name"
 
 void enq_dec(lf_queue_handle_t q)

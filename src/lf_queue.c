@@ -14,7 +14,6 @@ typedef uint64_t element_descriptor_t;
 
 typedef struct __attribute__((packed)) lf_element_impl {
     lf_element_t elem;
-    uint32_t mod_count;
     // followed by the element data
 } lf_element_impl_t;
 
@@ -26,6 +25,7 @@ typedef struct lf_queue_impl {
     element_descriptor_t free_head;
     size_t head;
     size_t tail;
+    uint32_t mod_count;
     bool should_free;
 } lf_queue_impl_t;
 
@@ -84,7 +84,7 @@ static inline lf_element_impl_t *get_elem_by_offset(lf_queue_impl_t *queue,
 {
 	lf_element_impl_t *e = ((void*)queue + sizeof(*queue)) +
 		(element_offset * raw_elem_size(queue->element_size));
-	e->elem.data = (void*)&e->mod_count + sizeof(e->mod_count);
+	e->elem.data = (void*)&e->elem + sizeof(e->elem);
 	return e;
 
 }
@@ -107,7 +107,7 @@ static inline lf_element_impl_t *get_element_by_descriptor(lf_queue_impl_t *queu
 static inline element_descriptor_t get_free_list_descriptor(lf_queue_impl_t *queue,
                                                             lf_element_impl_t *element)
 {
-	size_t mod_count = element->mod_count;
+	size_t mod_count = queue->mod_count;
 	size_t element_descriptor = mod_count << 32;
 	return element_descriptor | elem_offset(queue, element);
 }
@@ -173,16 +173,15 @@ int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements,
 	qimpl->head = 1;
 	qimpl->tail = 0;
 	qimpl->should_free = false;
+	qimpl->mod_count = 1;
 
 	curr = elements_start(qimpl);
-	curr->mod_count = 1;
 	for (i = 0; i < n_elements; ++i) {
 		next = (lf_element_impl_t *)((void *)curr + raw_elem_size(element_size));
-		curr->elem.data = (void*)&curr->mod_count + sizeof(curr->mod_count);
+		curr->elem.data = (void*)&curr->elem + sizeof(curr->elem);
 		if (i == n_elements - 1) {
 			*(element_descriptor_t *)curr->elem.data = 0;
 		} else {
-			next->mod_count = 1;
 			*(element_descriptor_t *) curr->elem.data = get_free_list_descriptor(
 				qimpl, next);
 		}
@@ -227,7 +226,7 @@ int lf_queue_get(lf_queue_handle_t queue, lf_element_t **element)
 		                                       curr_free, next_desc);
 		if (prev_val == curr_free) {
 			// swap was successful
-			eimpl->mod_count = (eimpl->mod_count + 1) % ELEMENT_OFFSET_MASK;
+			__sync_add_and_fetch(&qimpl->mod_count, 1);
 			*element = &eimpl->elem;
 			return 0;
 		}

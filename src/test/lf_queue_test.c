@@ -221,7 +221,7 @@ void shm_test(void)
 		assert(res == 0);
 		lf_queue_put(queue, &e);
 		enq(&queue, true);
-		lf_shm_queue_destroy(shm_queue);
+		lf_shm_queue_deattach(shm_queue);
 	} else { // parent
 		res = lf_shm_queue_init(&shm_queue, SHM_NAME, N_ELEM, sizeof(int));
 		assert(res == 0);

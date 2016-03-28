@@ -19,7 +19,9 @@ int lf_shm_queue_init(lf_shm_queue_handle_t *queue, const char *shm_name,
 // attach to an already initialized queue on top of a shared memory segment
 int lf_shm_queue_attach(lf_shm_queue_handle_t *queue, const char *shm_name,
                         size_t n_elements, size_t element_size);
-// destroy the queue, attached queues must be destroyed before initialized queues
+// de attach from a previously attached queue
+int lf_shm_queue_deattach(lf_shm_queue_handle_t queue);
+// destroy the queue,
 int lf_shm_queue_destroy(lf_shm_queue_handle_t queue);
 
 // obtain a handle to the underlying lock free queue

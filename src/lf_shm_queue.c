@@ -13,7 +13,6 @@ typedef struct lf_shm_queue_impl {
     size_t mem_size;
     char shm_name[256];
     void *shm_ptr;
-    bool unlink;
 } lf_shm_queue_impl_t;
 
 
@@ -38,7 +37,6 @@ int lf_shm_queue_init(lf_shm_queue_handle_t *queue, const char *shm_name,
 		printf("shm_open failed err=%d\n", errno);
 		return errno;
 	}
-	qimpl->unlink = true;
 	qimpl->shm_ptr = NULL;
 
 	res = ftruncate(shm_fd, qimpl->mem_size);
@@ -81,7 +79,6 @@ int lf_shm_queue_attach(lf_shm_queue_handle_t *queue, const char *shm_name,
 	}
 
 	qimpl->mem_size = lf_queue_get_required_memory(n_elements, element_size);
-	qimpl->unlink = false;
 	qimpl->shm_ptr = NULL;
 	strncpy(qimpl->shm_name, shm_name, sizeof(qimpl->shm_name));
 	shm_fd = shm_open(qimpl->shm_name, O_RDWR, S_IRUSR | S_IWUSR);
@@ -109,21 +106,34 @@ int lf_shm_queue_attach(lf_shm_queue_handle_t *queue, const char *shm_name,
 	return 0;
 }
 
-int lf_shm_queue_destroy(lf_shm_queue_handle_t queue)
+static void terminate(lf_shm_queue_impl_t *qimpl)
 {
 	int res;
-	lf_shm_queue_impl_t *qimpl = queue.handle;
 
 	lf_queue_destroy(qimpl->lf_queue);
 	res = munmap(qimpl->shm_ptr, qimpl->mem_size);
 	if (res != 0) {
 		printf("munmap failed err=%d\n", errno);
 	}
-	if (qimpl->unlink) {
-		res = shm_unlink(qimpl->shm_name);
-		if (res != 0) {
-			printf("shm_unlink failed err=%d\n", errno);
-		}
+}
+
+int lf_shm_queue_deattach(lf_shm_queue_handle_t queue)
+{
+	lf_shm_queue_impl_t *qimpl = queue.handle;
+	terminate(qimpl);
+	free(qimpl);
+	return 0;
+}
+
+int lf_shm_queue_destroy(lf_shm_queue_handle_t queue)
+{
+	int res;
+	lf_shm_queue_impl_t *qimpl = queue.handle;
+
+	terminate(qimpl);
+	res = shm_unlink(qimpl->shm_name);
+	if (res != 0) {
+		printf("shm_unlink failed err=%d\n", errno);
 	}
 	free(qimpl);
 	return 0;

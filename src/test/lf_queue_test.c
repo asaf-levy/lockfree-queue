@@ -12,9 +12,9 @@
 #include <stdbool.h>
 #include <lf_shm_queue.h>
 
-#define N_ELEM 4
-#define N_ITER 100000
-#define N_THREADS 32
+#define N_ELEM 1000
+#define N_ITER 1000000
+#define N_THREADS 8
 #define SHM_NAME "/shm_name"
 
 void enq_dec(lf_queue_handle_t q)
@@ -22,7 +22,7 @@ void enq_dec(lf_queue_handle_t q)
 	int i;
 	int err;
 	int *val;
-	lf_element_t *e;
+	lf_element_t e;
 
 	err = lf_queue_dequeue(q, &e);
 	assert(err == ENOMEM);
@@ -30,9 +30,9 @@ void enq_dec(lf_queue_handle_t q)
 	for (i = 0; i < N_ELEM; ++i) {
 		err = lf_queue_get(q, &e);
 		assert(err == 0);
-		val = e->data;
+		val = e.data;
 		*val = i;
-		lf_queue_enqueue(q, e);
+		lf_queue_enqueue(q, &e);
 	}
 	err = lf_queue_get(q, &e);
 	assert(err == ENOMEM);
@@ -40,9 +40,9 @@ void enq_dec(lf_queue_handle_t q)
 	for (i = 0; i < N_ELEM; ++i) {
 		err =  lf_queue_dequeue(q, &e);
 		assert(err == 0);
-		val = e->data;
+		val = e.data;
 		assert(*val == i);
-		lf_queue_put(q, e);
+		lf_queue_put(q, &e);
 	}
 
 	err = lf_queue_dequeue(q, &e);
@@ -72,7 +72,7 @@ void *enq_dec_task(void *arg)
 	int i;
 	int err;
 	int *val;
-	lf_element_t *e;
+	lf_element_t e;
 
 	for (i = 0; i < N_ITER; ++i) {
 //		if (i % 10000 == 0) {
@@ -80,17 +80,17 @@ void *enq_dec_task(void *arg)
 //		}
 		err = lf_queue_get(*q, &e);
 		if (err == 0) {
-			val = e->data;
+			val = e.data;
 			*val = i;
-			lf_queue_enqueue(*q, e);
+			lf_queue_enqueue(*q, &e);
 			__sync_add_and_fetch(&g_enq_sum, i);
 		}
 
 		err =  lf_queue_dequeue(*q, &e);
 		if (err == 0) {
-			val = e->data;
+			val = e.data;
 			__sync_add_and_fetch(&g_deq_sum, *val);
-			lf_queue_put(*q, e);
+			lf_queue_put(*q, &e);
 		}
 	}
 	return 0;
@@ -100,7 +100,7 @@ void dec(lf_queue_handle_t *q, bool block)
 {
 	int i;
 	int *val;
-	lf_element_t *e;
+	lf_element_t e;
 	int res;
 
 	for (i = 0; i < N_ITER; ++i) {
@@ -114,9 +114,9 @@ void dec(lf_queue_handle_t *q, bool block)
 			}
 		} while(block);
 		if (res == 0) {
-			val = e->data;
+			val = e.data;
 			__sync_add_and_fetch(&g_deq_sum, *val);
-			lf_queue_put(*q, e);
+			lf_queue_put(*q, &e);
 		}
 	}
 }
@@ -132,7 +132,7 @@ void enq(lf_queue_handle_t *q, bool block)
 {
 	int i;
 	int *val;
-	lf_element_t *e;
+	lf_element_t e;
 	int res = 0;
 
 	for (i = 0; i < N_ITER; ++i) {
@@ -146,9 +146,9 @@ void enq(lf_queue_handle_t *q, bool block)
 			}
 		} while(block);
 		if (res == 0) {
-			val = e->data;
+			val = e.data;
 			*val = i;
-			lf_queue_enqueue(*q, e);
+			lf_queue_enqueue(*q, &e);
 			__sync_add_and_fetch(&g_enq_sum, i);
 		}
 	}
@@ -209,7 +209,7 @@ void shm_test(void)
 	int pid;
 	lf_shm_queue_handle_t shm_queue;
 	lf_queue_handle_t queue;
-	lf_element_t *e;
+	lf_element_t e;
 
 	pid = fork();
 	if (pid == 0) { // child
@@ -219,7 +219,7 @@ void shm_test(void)
 		queue = lf_shm_queue_get_underlying_handle(shm_queue);
 		res = lf_queue_get(queue, &e);
 		assert(res == 0);
-		lf_queue_put(queue, e);
+		lf_queue_put(queue, &e);
 		enq(&queue, true);
 		lf_shm_queue_destroy(shm_queue);
 	} else { // parent

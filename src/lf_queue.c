@@ -9,13 +9,7 @@
 #include <stdlib.h>
 #include <assert.h>
 
-typedef struct lf_element_impl lf_element_impl_t;
 typedef uint64_t element_descriptor_t;
-
-typedef struct __attribute__((packed)) lf_element_impl {
-    lf_element_t elem;
-    // followed by the element data
-} lf_element_impl_t;
 
 #define LF_QUEUE_MAGIC 0x68478320ac2
 typedef struct lf_queue_impl {
@@ -65,51 +59,44 @@ static inline size_t get_min_element_size(size_t element_size)
 
 static inline size_t raw_elem_size(size_t element_size)
 {
-	element_size = get_min_element_size(element_size);
-	return element_size + sizeof(lf_element_impl_t);
+	return get_min_element_size(element_size);
 }
 
-static inline lf_element_impl_t * elements_start(lf_queue_impl_t *queue)
+static inline void *elements_start(lf_queue_impl_t *queue)
 {
 	return ((void*)queue + sizeof(*queue));
 }
 
-static inline size_t elem_offset(lf_queue_impl_t *queue, lf_element_impl_t *element)
+static inline size_t data_offset(lf_queue_impl_t *queue, void *element_data)
 {
-	return (((void*)element - (void*)elements_start(queue)) / raw_elem_size(queue->element_size));
+	return ((element_data - (void*)elements_start(queue)) / raw_elem_size(queue->element_size));
 }
 
-static inline lf_element_impl_t *get_elem_by_offset(lf_queue_impl_t *queue,
-                                                    size_t element_offset)
+static inline void *get_elem_data_by_offset(lf_queue_impl_t *queue, size_t element_offset)
 {
-	lf_element_impl_t *e = ((void*)queue + sizeof(*queue)) +
-		(element_offset * raw_elem_size(queue->element_size));
-	e->elem.data = (void*)&e->elem + sizeof(e->elem);
-	return e;
+	return ((void*)queue + sizeof(*queue)) + (element_offset * raw_elem_size(queue->element_size));
 
 }
 
-static inline size_t get_element_descriptor(lf_queue_impl_t *queue,
-                                            lf_element_impl_t *element)
+static inline size_t get_element_descriptor(lf_queue_impl_t *queue, void *edata)
 {
 	size_t queue_gen = (queue->tail + 1) / queue->n_elements;
 	size_t element_descriptor = queue_gen;
 	element_descriptor = (element_descriptor << 32) & QUEUE_GEN_MASK;
-	return element_descriptor | elem_offset(queue, element);
+	return element_descriptor | data_offset(queue, edata);
 }
 
-static inline lf_element_impl_t *get_element_by_descriptor(lf_queue_impl_t *queue,
-                                                           size_t element_descriptor)
+static inline void *get_element_data_by_descriptor(lf_queue_impl_t *queue, size_t element_descriptor)
 {
-	return get_elem_by_offset(queue, element_descriptor & ELEMENT_OFFSET_MASK);
+	return get_elem_data_by_offset(queue, element_descriptor & ELEMENT_OFFSET_MASK);
 }
 
 static inline element_descriptor_t get_free_list_descriptor(lf_queue_impl_t *queue,
-                                                            lf_element_impl_t *element)
+                                                            void *edata)
 {
 	size_t mod_count = queue->mod_count;
 	size_t element_descriptor = mod_count << 32;
-	return element_descriptor | elem_offset(queue, element);
+	return element_descriptor | data_offset(queue, edata);
 }
 
 static inline element_descriptor_t *descriptors_start(lf_queue_impl_t *queue)
@@ -155,8 +142,8 @@ int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements,
                       size_t element_size)
 {
 	size_t i;
-	lf_element_impl_t *curr;
-	lf_element_impl_t *next;
+	void *curr;
+	void *next;
 	element_descriptor_t *element_descriptors;
 	lf_queue_impl_t *qimpl = mem;
 
@@ -177,12 +164,11 @@ int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements,
 
 	curr = elements_start(qimpl);
 	for (i = 0; i < n_elements; ++i) {
-		next = (lf_element_impl_t *)((void *)curr + raw_elem_size(element_size));
-		curr->elem.data = (void*)&curr->elem + sizeof(curr->elem);
+		next = (void *)curr + raw_elem_size(element_size);
 		if (i == n_elements - 1) {
-			*(element_descriptor_t *)curr->elem.data = 0;
+			*(element_descriptor_t *)curr = 0;
 		} else {
-			*(element_descriptor_t *) curr->elem.data = get_free_list_descriptor(
+			*(element_descriptor_t *)curr = get_free_list_descriptor(
 				qimpl, next);
 		}
 		curr = next;
@@ -211,7 +197,7 @@ void lf_queue_destroy(lf_queue_handle_t queue)
 	}
 }
 
-int lf_queue_get(lf_queue_handle_t queue, lf_element_t **element)
+int lf_queue_get(lf_queue_handle_t queue, lf_element_t *element)
 {
 	lf_queue_impl_t *qimpl = queue.handle;
 	element_descriptor_t curr_free = 0;
@@ -220,14 +206,14 @@ int lf_queue_get(lf_queue_handle_t queue, lf_element_t **element)
 	assert(qimpl->magic == LF_QUEUE_MAGIC);
 	curr_free = qimpl->free_head;
 	while (curr_free != 0) {
-		lf_element_impl_t *eimpl = get_element_by_descriptor(qimpl, curr_free);
-		element_descriptor_t next_desc = *(element_descriptor_t*)eimpl->elem.data;
+		void *edata = get_element_data_by_descriptor(qimpl, curr_free);
+		element_descriptor_t next_desc = *(element_descriptor_t*)edata;
 		prev_val = __sync_val_compare_and_swap(&qimpl->free_head,
 		                                       curr_free, next_desc);
 		if (prev_val == curr_free) {
 			// swap was successful
 			__sync_add_and_fetch(&qimpl->mod_count, 1);
-			*element = &eimpl->elem;
+			element->data = edata;
 			return 0;
 		}
 		curr_free = prev_val;
@@ -238,15 +224,15 @@ int lf_queue_get(lf_queue_handle_t queue, lf_element_t **element)
 void lf_queue_put(lf_queue_handle_t queue, lf_element_t *element)
 {
 	lf_queue_impl_t *qimpl = queue.handle;
-	lf_element_impl_t *element_impl = container_of(element, lf_element_impl_t, elem);
 	element_descriptor_t curr_free = qimpl->free_head;
 	element_descriptor_t prev_val;
 
 	assert(qimpl->magic == LF_QUEUE_MAGIC);
 	do {
-		*(element_descriptor_t *)element_impl->elem.data = curr_free;
+		*(element_descriptor_t *)element->data = curr_free;
 		prev_val = __sync_val_compare_and_swap(&qimpl->free_head,
-		                                       curr_free, get_free_list_descriptor(qimpl, element_impl));
+		                                       curr_free,
+		                                       get_free_list_descriptor(qimpl, element->data));
 		if (prev_val == curr_free) {
 //			PRINT("(%d) PUT curr_free=%p element=%p\n", get_tid(), curr_free, element);
 			break;
@@ -258,7 +244,6 @@ void lf_queue_put(lf_queue_handle_t queue, lf_element_t *element)
 void lf_queue_enqueue(lf_queue_handle_t queue, lf_element_t *element)
 {
 	lf_queue_impl_t *qimpl = queue.handle;
-	lf_element_impl_t *e_impl = container_of(element, lf_element_impl_t, elem);
 #ifdef QDEBUG
 	size_t prev_head;
 	size_t prev_tail;
@@ -293,7 +278,7 @@ void lf_queue_enqueue(lf_queue_handle_t queue, lf_element_t *element)
 			continue;
 		}
 		if (__sync_bool_compare_and_swap(desc_ptr, elem_desc,
-		                                 USED_BIT | get_element_descriptor(qimpl, e_impl))) {
+		                                 USED_BIT | get_element_descriptor(qimpl, element->data))) {
 			// one could claim since tail always advances there is the
 			// risk of a wraparound. However this is not a practical
 			// concern since even if you add a new item to the queue
@@ -311,7 +296,7 @@ void lf_queue_enqueue(lf_queue_handle_t queue, lf_element_t *element)
 	} while (true);
 }
 
-int lf_queue_dequeue(lf_queue_handle_t queue, lf_element_t **element)
+int lf_queue_dequeue(lf_queue_handle_t queue, lf_element_t *element)
 {
 	lf_queue_impl_t *qimpl = queue.handle;
 	size_t head;
@@ -354,7 +339,7 @@ int lf_queue_dequeue(lf_queue_handle_t queue, lf_element_t **element)
 		}
 		if (__sync_bool_compare_and_swap(desc_ptr, elem_desc, tail)) {
 			__sync_add_and_fetch(&qimpl->head, 1);
-			*element = &get_element_by_descriptor(qimpl, elem_desc & ~USED_BIT)->elem;
+			element->data = get_element_data_by_descriptor(qimpl, elem_desc & ~USED_BIT);
 			PRINT("(%d) DEQ 2 *element=%p element_descriptor=%lx desc_queue_gen=%lu prev_head=%lu head=%lu tail=%lu\n",
 			      get_tid(), *element, elem_desc, desc_queue_gen, prev_head, head, tail);
 			return 0;

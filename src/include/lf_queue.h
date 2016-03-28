@@ -32,12 +32,12 @@ int lf_queue_attach(lf_queue_handle_t *queue, void *mem);
 void lf_queue_destroy(lf_queue_handle_t queue);
 // get an element from the queue that to be later on queued by calling lf_queue_enqueue
 // will fail with ENOMEM in case all of the elements in the queue are already in use
-int lf_queue_get(lf_queue_handle_t queue, lf_element_t **element);
+int lf_queue_get(lf_queue_handle_t queue, lf_element_t *element);
 // enqueue an element that was obtained by a call to lf_queue_get
 void lf_queue_enqueue(lf_queue_handle_t queue, lf_element_t *element);
 // dequeue an element from the queue, the element must be later returned by a call
 // to lf_queue_put
-int lf_queue_dequeue(lf_queue_handle_t queue, lf_element_t **element);
+int lf_queue_dequeue(lf_queue_handle_t queue, lf_element_t *element);
 // return an element to the queue that was obtained by a call lf_queue_dequeue
 void lf_queue_put(lf_queue_handle_t queue, lf_element_t *element);
 

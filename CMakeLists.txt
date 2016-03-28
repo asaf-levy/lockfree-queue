@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 2.8.12)
 project(lockfree_queue)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-
 macro(add_flags var)
     string(REPLACE ";" " " _flags "${ARGN}")
     set(${var} "${${var}} ${_flags}")

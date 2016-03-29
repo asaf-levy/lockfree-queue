@@ -16,7 +16,7 @@ typedef struct lf_shm_queue_impl {
 } lf_shm_queue_impl_t;
 
 
-int lf_shm_queue_init(lf_shm_queue_handle_t *queue, const char *shm_name,
+int lf_shm_queue_init(lf_shm_queue_t *queue, const char *shm_name,
                       size_t n_elements, size_t element_size)
 {
 	lf_shm_queue_impl_t *qimpl;
@@ -66,7 +66,7 @@ int lf_shm_queue_init(lf_shm_queue_handle_t *queue, const char *shm_name,
 	return 0;
 }
 
-int lf_shm_queue_attach(lf_shm_queue_handle_t *queue, const char *shm_name,
+int lf_shm_queue_attach(lf_shm_queue_t *queue, const char *shm_name,
                         size_t n_elements, size_t element_size)
 {
 	lf_shm_queue_impl_t *qimpl;
@@ -117,7 +117,7 @@ static void terminate(lf_shm_queue_impl_t *qimpl)
 	}
 }
 
-int lf_shm_queue_deattach(lf_shm_queue_handle_t queue)
+int lf_shm_queue_deattach(lf_shm_queue_t queue)
 {
 	lf_shm_queue_impl_t *qimpl = queue.handle;
 	terminate(qimpl);
@@ -125,7 +125,7 @@ int lf_shm_queue_deattach(lf_shm_queue_handle_t queue)
 	return 0;
 }
 
-int lf_shm_queue_destroy(lf_shm_queue_handle_t queue)
+int lf_shm_queue_destroy(lf_shm_queue_t queue)
 {
 	int res;
 	lf_shm_queue_impl_t *qimpl = queue.handle;
@@ -139,7 +139,7 @@ int lf_shm_queue_destroy(lf_shm_queue_handle_t queue)
 	return 0;
 }
 
-lf_queue_t lf_shm_queue_get_underlying_handle(lf_shm_queue_handle_t queue)
+lf_queue_t lf_shm_queue_get_underlying_handle(lf_shm_queue_t queue)
 {
 	lf_shm_queue_impl_t *qimpl = queue.handle;
 	return qimpl->lf_queue;

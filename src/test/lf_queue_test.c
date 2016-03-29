@@ -207,7 +207,7 @@ void shm_test(void)
 {
 	int res;
 	int pid;
-	lf_shm_queue_handle_t shm_queue;
+	lf_shm_queue_t shm_queue;
 	lf_queue_t queue;
 	lf_element_t e;
 

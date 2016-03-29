@@ -111,7 +111,7 @@ size_t lf_queue_get_required_memory(size_t n_elements, size_t element_size)
 		+ (n_elements * sizeof(element_descriptor_t));
 }
 
-int lf_queue_init(lf_queue_handle_t *queue, size_t n_elements, size_t element_size)
+int lf_queue_init(lf_queue_t *queue, size_t n_elements, size_t element_size)
 {
 	int err;
 	lf_queue_impl_t *qimpl;
@@ -138,7 +138,7 @@ int lf_queue_init(lf_queue_handle_t *queue, size_t n_elements, size_t element_si
 	return err;
 }
 
-int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements,
+int lf_queue_mem_init(lf_queue_t *queue, void *mem, size_t n_elements,
                       size_t element_size)
 {
 	size_t i;
@@ -179,7 +179,7 @@ int lf_queue_mem_init(lf_queue_handle_t *queue, void *mem, size_t n_elements,
 	return 0;
 }
 
-int lf_queue_attach(lf_queue_handle_t *queue, void *mem)
+int lf_queue_attach(lf_queue_t *queue, void *mem)
 {
 	lf_queue_impl_t *qimpl = mem;
 	if (qimpl->magic != LF_QUEUE_MAGIC) {
@@ -189,7 +189,7 @@ int lf_queue_attach(lf_queue_handle_t *queue, void *mem)
 	return 0;
 }
 
-void lf_queue_destroy(lf_queue_handle_t queue)
+void lf_queue_destroy(lf_queue_t queue)
 {
 	lf_queue_impl_t *qimpl = queue.handle;
 	if (qimpl->should_free) {
@@ -197,7 +197,7 @@ void lf_queue_destroy(lf_queue_handle_t queue)
 	}
 }
 
-int lf_queue_get(lf_queue_handle_t queue, lf_element_t *element)
+int lf_queue_get(lf_queue_t queue, lf_element_t *element)
 {
 	lf_queue_impl_t *qimpl = queue.handle;
 	element_descriptor_t curr_free = 0;
@@ -221,7 +221,7 @@ int lf_queue_get(lf_queue_handle_t queue, lf_element_t *element)
 	return ENOMEM;
 }
 
-void lf_queue_put(lf_queue_handle_t queue, lf_element_t *element)
+void lf_queue_put(lf_queue_t queue, lf_element_t *element)
 {
 	lf_queue_impl_t *qimpl = queue.handle;
 	element_descriptor_t curr_free = qimpl->free_head;
@@ -241,7 +241,7 @@ void lf_queue_put(lf_queue_handle_t queue, lf_element_t *element)
 	} while (true);
 }
 
-void lf_queue_enqueue(lf_queue_handle_t queue, lf_element_t *element)
+void lf_queue_enqueue(lf_queue_t queue, lf_element_t *element)
 {
 	lf_queue_impl_t *qimpl = queue.handle;
 #ifdef QDEBUG
@@ -296,7 +296,7 @@ void lf_queue_enqueue(lf_queue_handle_t queue, lf_element_t *element)
 	} while (true);
 }
 
-int lf_queue_dequeue(lf_queue_handle_t queue, lf_element_t *element)
+int lf_queue_dequeue(lf_queue_t queue, lf_element_t *element)
 {
 	lf_queue_impl_t *qimpl = queue.handle;
 	size_t head;

@@ -17,7 +17,7 @@
 #define N_THREADS 8
 #define SHM_NAME "/shm_name"
 
-void enq_dec(lf_queue_handle_t q)
+void enq_dec(lf_queue_t q)
 {
 	int i;
 	int err;
@@ -52,7 +52,7 @@ void enq_dec(lf_queue_handle_t q)
 void serial_test(void)
 {
 	int i;
-	lf_queue_handle_t q;
+	lf_queue_t q;
 	int err = lf_queue_init(&q, N_ELEM, sizeof(int));
 	assert(err == 0);
 
@@ -68,7 +68,7 @@ uint64_t g_deq_sum = 0;
 
 void *enq_dec_task(void *arg)
 {
-	lf_queue_handle_t *q = arg;
+	lf_queue_t *q = arg;
 	int i;
 	int err;
 	int *val;
@@ -96,7 +96,7 @@ void *enq_dec_task(void *arg)
 	return 0;
 }
 
-void dec(lf_queue_handle_t *q, bool block)
+void dec(lf_queue_t *q, bool block)
 {
 	int i;
 	int *val;
@@ -123,12 +123,12 @@ void dec(lf_queue_handle_t *q, bool block)
 
 void *dec_task(void *arg)
 {
-	lf_queue_handle_t *q = arg;
+	lf_queue_t *q = arg;
 	dec(q, false);
 	return 0;
 }
 
-void enq(lf_queue_handle_t *q, bool block)
+void enq(lf_queue_t *q, bool block)
 {
 	int i;
 	int *val;
@@ -156,7 +156,7 @@ void enq(lf_queue_handle_t *q, bool block)
 
 void *enq_task(void *arg)
 {
-	lf_queue_handle_t *q = arg;
+	lf_queue_t *q = arg;
 	enq(q, false);
 	return 0;
 }
@@ -167,7 +167,7 @@ void mt_test(void)
 	int i;
 	int err;
 	pthread_t threads[N_THREADS];
-	lf_queue_handle_t q;
+	lf_queue_t q;
 	struct timespec start;
 	struct timespec end;
 
@@ -208,7 +208,7 @@ void shm_test(void)
 	int res;
 	int pid;
 	lf_shm_queue_handle_t shm_queue;
-	lf_queue_handle_t queue;
+	lf_queue_t queue;
 	lf_element_t e;
 
 	pid = fork();

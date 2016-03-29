@@ -9,7 +9,7 @@
 #include <string.h>
 
 typedef struct lf_shm_queue_impl {
-    lf_queue_handle_t lf_queue;
+    lf_queue_t lf_queue;
     size_t mem_size;
     char shm_name[256];
     void *shm_ptr;
@@ -139,7 +139,7 @@ int lf_shm_queue_destroy(lf_shm_queue_handle_t queue)
 	return 0;
 }
 
-lf_queue_handle_t lf_shm_queue_get_underlying_handle(lf_shm_queue_handle_t queue)
+lf_queue_t lf_shm_queue_get_underlying_handle(lf_shm_queue_handle_t queue)
 {
 	lf_shm_queue_impl_t *qimpl = queue.handle;
 	return qimpl->lf_queue;

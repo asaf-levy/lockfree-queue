@@ -17,7 +17,8 @@ struct lf_shm_queue {
 
 
 lf_shm_queue *lf_shm_queue_init(const char *shm_name, size_t n_elements,
-                                size_t element_size) {
+                                size_t element_size)
+{
 	int shm_fd;
 	int res;
 	lf_shm_queue *shm_queue;
@@ -68,7 +69,8 @@ lf_shm_queue *lf_shm_queue_init(const char *shm_name, size_t n_elements,
 }
 
 lf_shm_queue *lf_shm_queue_attach(const char *shm_name, size_t n_elements,
-                                  size_t element_size) {
+                                  size_t element_size)
+{
 	int shm_fd;
 
 	lf_shm_queue *shm_queue = malloc(sizeof(lf_shm_queue));
@@ -105,7 +107,8 @@ lf_shm_queue *lf_shm_queue_attach(const char *shm_name, size_t n_elements,
 	return shm_queue;
 }
 
-static void terminate(lf_shm_queue *queue) {
+static void terminate(lf_shm_queue *queue)
+{
 	int res;
 
 	lf_queue_destroy(queue->queue);
@@ -115,13 +118,15 @@ static void terminate(lf_shm_queue *queue) {
 	}
 }
 
-int lf_shm_queue_deattach(lf_shm_queue *queue) {
+int lf_shm_queue_deattach(lf_shm_queue *queue)
+{
 	terminate(queue);
 	free(queue);
 	return 0;
 }
 
-int lf_shm_queue_destroy(lf_shm_queue *queue) {
+int lf_shm_queue_destroy(lf_shm_queue *queue)
+{
 	int res;
 
 	terminate(queue);
@@ -133,6 +138,7 @@ int lf_shm_queue_destroy(lf_shm_queue *queue) {
 	return 0;
 }
 
-lf_queue *lf_shm_queue_get_underlying_handle(lf_shm_queue *queue) {
+lf_queue *lf_shm_queue_get_underlying_handle(lf_shm_queue *queue)
+{
 	return queue->queue;
 }

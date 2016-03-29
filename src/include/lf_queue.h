@@ -1,5 +1,4 @@
-#ifndef __IF_QUEUE_H_INCLUDED__
-#define __IF_QUEUE_H_INCLUDED__
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -43,6 +42,4 @@ void lf_queue_put(lf_queue_handle_t queue, lf_element_t *element);
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif

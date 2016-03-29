@@ -1,5 +1,4 @@
-#ifndef __IF_SHM_QUEUE_H_INCLUDED__
-#define __IF_SHM_QUEUE_H_INCLUDED__
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -29,6 +28,4 @@ lf_queue_handle_t lf_shm_queue_get_underlying_handle(lf_shm_queue_handle_t queue
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif

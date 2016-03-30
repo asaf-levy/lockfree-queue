@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
-#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -14,7 +13,6 @@ struct lf_shm_queue {
     char shm_name[256];
     void *shm_ptr;
 };
-
 
 lf_shm_queue *lf_shm_queue_init(const char *shm_name, size_t n_elements,
                                 size_t element_size)

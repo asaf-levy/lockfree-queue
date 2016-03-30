@@ -1,25 +1,20 @@
-#include "lf_queue.h"
 #include <stdio.h>
 #include <assert.h>
 #include <errno.h>
 #include <unistd.h>
-#include <sys/mman.h>
 #include <pthread.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <sys/wait.h>
 #include <stdbool.h>
-#include <lf_shm_queue.h>
+#include "lf_queue.h"
+#include "lf_shm_queue.h"
 
-#define N_ELEM 1000
+#define N_ELEM 10
 #define N_ITER 1000000
 #define N_THREADS 8
 #define SHM_NAME "/shm_name"
 
 void enq_dec(lf_queue *q)
 {
-	int i;
 	int err;
 	int *val;
 	lf_element_t e;
@@ -27,7 +22,7 @@ void enq_dec(lf_queue *q)
 	err = lf_queue_dequeue(q, &e);
 	assert(err == ENOMEM);
 
-	for (i = 0; i < N_ELEM; ++i) {
+	for (int i = 0; i < N_ELEM; ++i) {
 		err = lf_queue_get(q, &e);
 		assert(err == 0);
 		val = e.data;
@@ -37,7 +32,7 @@ void enq_dec(lf_queue *q)
 	err = lf_queue_get(q, &e);
 	assert(err == ENOMEM);
 
-	for (i = 0; i < N_ELEM; ++i) {
+	for (int i = 0; i < N_ELEM; ++i) {
 		err =  lf_queue_dequeue(q, &e);
 		assert(err == 0);
 		val = e.data;
@@ -51,11 +46,10 @@ void enq_dec(lf_queue *q)
 
 void serial_test(void)
 {
-	int i;
 	lf_queue *q = lf_queue_init(N_ELEM, sizeof(int));
 	assert(q != NULL);
 
-	for (i = 0; i < 10; ++i) {
+	for (int i = 0; i < 10; ++i) {
 		enq_dec(q);
 	}
 
@@ -68,12 +62,11 @@ uint64_t g_deq_sum = 0;
 void *enq_dec_task(void *arg)
 {
 	lf_queue *q = arg;
-	int i;
 	int err;
 	int *val;
 	lf_element_t e;
 
-	for (i = 0; i < N_ITER; ++i) {
+	for (int i = 0; i < N_ITER; ++i) {
 //		if (i % 10000 == 0) {
 //			fprintf(stderr, "Iteration %d\n", i);
 //		}
@@ -97,12 +90,11 @@ void *enq_dec_task(void *arg)
 
 void dec(lf_queue *q, bool block)
 {
-	int i;
 	int *val;
 	lf_element_t e;
 	int res;
 
-	for (i = 0; i < N_ITER; ++i) {
+	for (int i = 0; i < N_ITER; ++i) {
 //		if (i % 100000 == 0) {
 //			fprintf(stderr, "Iteration %d\n", i);
 //		}
@@ -129,12 +121,11 @@ void *dec_task(void *arg)
 
 void enq(lf_queue *q, bool block)
 {
-	int i;
 	int *val;
 	lf_element_t e;
 	int res = 0;
 
-	for (i = 0; i < N_ITER; ++i) {
+	for (int i = 0; i < N_ITER; ++i) {
 //		if (i % 100000 == 0) {
 //			fprintf(stderr, "Iteration %d\n", i);
 //		}
@@ -163,7 +154,6 @@ void *enq_task(void *arg)
 
 void mt_test(void)
 {
-	int i;
 	int err;
 	pthread_t threads[N_THREADS];
 	lf_queue *q;
@@ -175,7 +165,7 @@ void mt_test(void)
 
 	clock_gettime(CLOCK_REALTIME, &start);
 
-	for (i = 0; i < N_THREADS; ++i) {
+	for (int i = 0; i < N_THREADS; ++i) {
 		if (i % 3 == 0) {
 			err = pthread_create(&threads[i], NULL, enq_dec_task, q);
 		}
@@ -188,7 +178,7 @@ void mt_test(void)
 		assert(err == 0);
 	}
 
-	for (i = 0; i < N_THREADS; ++i) {
+	for (int i = 0; i < N_THREADS; ++i) {
 		pthread_join(threads[i], NULL);
 	}
 	dec(q, false);

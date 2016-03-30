@@ -3,9 +3,6 @@
 #include <string.h>
 #include <errno.h>
 #include <stdbool.h>
-#include <syscall.h>
-#include <unistd.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
 
@@ -22,23 +19,6 @@ struct lf_queue {
     uint32_t mod_count;
     bool should_free;
 };
-
-
-#ifdef QDEBUG
-__thread pid_t g_tid = 0;
-pid_t get_tid(void)
-{
-	if (!g_tid) {
-		g_tid = (pid_t)syscall(SYS_gettid);
-	}
-	return g_tid;
-}
-
-#define PRINT(FMT, ARGS...)  \
-	printf(FMT, ##ARGS)
-#else
-#define PRINT(FMT, ARGS...)
-#endif
 
 #define USED_BIT                0x8000000000000000
 #define ELEMENT_OFFSET_MASK     0x00000000ffffffff
@@ -76,12 +56,12 @@ static inline void *get_elem_data_by_offset(lf_queue *queue, size_t element_offs
 
 }
 
-static inline size_t get_element_descriptor(lf_queue *queue, void *edata)
+static inline size_t get_element_descriptor(lf_queue *queue, void *element_data)
 {
 	size_t queue_gen = (queue->tail + 1) / queue->n_elements;
 	size_t element_descriptor = queue_gen;
 	element_descriptor = (element_descriptor << 32) & QUEUE_GEN_MASK;
-	return element_descriptor | data_offset(queue, edata);
+	return element_descriptor | data_offset(queue, element_data);
 }
 
 static inline void *get_element_data_by_descriptor(lf_queue *queue, size_t element_descriptor)
@@ -222,7 +202,6 @@ void lf_queue_put(lf_queue *queue, lf_element_t *element)
 		                                       curr_free,
 		                                       get_free_list_descriptor(queue, element->data));
 		if (prev_val == curr_free) {
-//			PRINT("(%d) PUT curr_free=%p element=%p\n", get_tid(), curr_free, element);
 			break;
 		}
 		curr_free = prev_val;
@@ -231,37 +210,24 @@ void lf_queue_put(lf_queue *queue, lf_element_t *element)
 
 void lf_queue_enqueue(lf_queue *queue, lf_element_t *element)
 {
-#ifdef QDEBUG
-	size_t prev_head;
-	size_t prev_tail;
-#endif
-	size_t tail;
 	element_descriptor_t *desc_ptr;
 	element_descriptor_t elem_desc;
 
 	assert(queue->magic == LF_QUEUE_MAGIC);
 	do {
-		tail = __sync_add_and_fetch(&queue->tail, 0);
-//		prev_tail = tail;
+		size_t tail = __sync_add_and_fetch(&queue->tail, 0);
 		desc_ptr = &descriptors_start(queue)[(tail + 1) % queue->n_elements];
 		elem_desc = *desc_ptr;
-//				prev_head = queue->head;
-//		PRINT("(%d) ENQ 1 desc_ptr=%p element_descriptor=%lx head=%lu tail=%lu\n", get_tid(),
-//		       desc_ptr, elem_desc, queue->head, tail);
 		if ((elem_desc & USED_BIT)) {
 			// this slot is already in use, some other thread won the
 			// race to enqueue it
-			PRINT("(%d) ENQ SLOT-TAKEN desc_ptr=%p elem_desc=%lx head=%lu tail=%lu\n", get_tid(),
-			      desc_ptr, elem_desc, queue->head, tail);
 			continue;
 		}
-		if ((elem_desc & ~USED_BIT) && ((elem_desc & ~USED_BIT) > tail)) {
+		if ((elem_desc & ~USED_BIT) > tail) {
 			// this slot is free, but the value this thread think tail
 			// has is outdated meaning that some other thread(s) have
 			// already enqueued and dequeued this slot since we got
 			// the value of tail
-			PRINT("(%d) ENQ TAIL-UPDATED desc_ptr=%p desc_tail=%lu head=%lu tail=%lu\n", get_tid(),
-			      desc_ptr, elem_desc & ~USED_BIT, queue->head, tail);
 			continue;
 		}
 		if (__sync_bool_compare_and_swap(desc_ptr, elem_desc,
@@ -271,68 +237,45 @@ void lf_queue_enqueue(lf_queue *queue, lf_element_t *element)
 			// concern since even if you add a new item to the queue
 			// every nano sec it would still take ~584 years for 64 bits
 			// to wrap.
-			tail = __sync_add_and_fetch(&queue->tail, 1);
-			PRINT("(%d) ENQ 2 desc_ptr=%p element_descriptor=%lu calc_element_descriptor=%lx prev_head=%lu head=%lu prev_tail=%lu tail=%lu\n", get_tid(),
-			       desc_ptr, elem_desc,
-			       get_element_descriptor(queue, e_impl), prev_head, queue->head, prev_tail, tail);
+			__sync_add_and_fetch(&queue->tail, 1);
 			return;
-		} else {
-			PRINT("(%d) ENQ RETRY desc_ptr=%p head=%lu tail=%lu\n", get_tid(),
-			      desc_ptr, queue->head, tail);
 		}
 	} while (true);
 }
 
 int lf_queue_dequeue(lf_queue *queue, lf_element_t *element)
 {
-	size_t head;
-#ifdef QDEBUG
-	size_t prev_head;
-#endif
-	size_t tail;
 	element_descriptor_t elem_desc;
-	int64_t desc_queue_gen;
-	int64_t current_queue_gen;
 	element_descriptor_t *desc_ptr;
 
 	assert(queue->magic == LF_QUEUE_MAGIC);
 	do {
-		head = __sync_add_and_fetch(&queue->head, 0);
-#ifdef QDEBUG
-		prev_head = head;
-#endif
-		tail = __sync_add_and_fetch(&queue->tail, 0);
+		size_t head = __sync_add_and_fetch(&queue->head, 0);
+		size_t tail = __sync_add_and_fetch(&queue->tail, 0);
 		if (head > tail) {
 			return ENOMEM;
 		}
 		desc_ptr = &descriptors_start(queue)[head % queue->n_elements];
 		elem_desc = *desc_ptr;
-		desc_queue_gen = (int64_t) ((elem_desc & QUEUE_GEN_MASK) >> 32);
-		current_queue_gen = (int64_t) ((head / queue->n_elements) & 0xffffffff);
-		if (desc_queue_gen - current_queue_gen > 0 && desc_queue_gen - current_queue_gen < 0x0fffff) {
-			PRINT("(%d) DEQ OUTDATED QUEUE GEN, desc_queue_gen=%lu current_queue_gen=%lu element_descriptor=0x%lx head=%lu tail=%lu\n", get_tid(),
-			      desc_queue_gen, current_queue_gen, elem_desc, head, tail);
+		if ((elem_desc & USED_BIT) == 0) {
 			// some other thread have already dequeued this element
 			continue;
 		}
-//		PRINT("(%d) DEQ 1 element_descriptor=%lx head=%lu tail=%lu\n", get_tid(),
-//		       elem_desc, head, tail);
-		if ((elem_desc & USED_BIT) == 0) {
-			PRINT("(%d) DEQ USED_BIT NOT SET, element_descriptor=%lu head=%lu tail=%lu\n", get_tid(),
-			       elem_desc, head, tail);
-			// some other thread have already dequeued this element
+		int64_t desc_queue_gen = (int64_t) ((elem_desc & QUEUE_GEN_MASK) >> 32);
+		int64_t current_queue_gen = (int64_t) ((head / queue->n_elements) & 0xffffffff);
+		if (desc_queue_gen - current_queue_gen > 0 && desc_queue_gen - current_queue_gen < 0x0fffff) {
+			// The queue gen represent the number of times the respective pointer (head or tail) has wrapped
+			// around the descriptors array. A free slot in the descriptor array contains the value of the
+			// tail queue gen at the time this slot was freed. current_queue_gen contains the queue gen of
+			// what this thread thinks is the current value of head.
+			// If the above condition applies it means that value of head this thread has is outdated
+			// in relation to the element it is looking at
 			continue;
 		}
 		if (__sync_bool_compare_and_swap(desc_ptr, elem_desc, tail)) {
 			__sync_add_and_fetch(&queue->head, 1);
 			element->data = get_element_data_by_descriptor(queue, elem_desc & ~USED_BIT);
-			PRINT("(%d) DEQ 2 *element=%p element_descriptor=%lx desc_queue_gen=%lu prev_head=%lu head=%lu tail=%lu\n",
-			      get_tid(), *element, elem_desc, desc_queue_gen, prev_head, head, tail);
 			return 0;
-		} else {
-			PRINT("(%d) DEQ RETRY element_descriptor=%lx head=%lu tail=%lu\n", get_tid(),
-			       elem_desc, head, tail);
 		}
 	} while (true);
 }
-

@@ -167,7 +167,7 @@ void lf_queue_destroy(lf_queue *queue)
 	}
 }
 
-int lf_queue_get(lf_queue *queue, lf_element_t *element)
+void *lf_queue_get(lf_queue *queue)
 {
 	element_descriptor_t curr_free = 0;
 	element_descriptor_t prev_val;
@@ -175,32 +175,31 @@ int lf_queue_get(lf_queue *queue, lf_element_t *element)
 	assert(queue->magic == LF_QUEUE_MAGIC);
 	curr_free = queue->free_head;
 	while (curr_free != 0) {
-		void *edata = get_element_data_by_descriptor(queue, curr_free);
-		element_descriptor_t next_desc = *(element_descriptor_t*)edata;
+		void *data = get_element_data_by_descriptor(queue, curr_free);
+		element_descriptor_t next_desc = *(element_descriptor_t*)data;
 		prev_val = __sync_val_compare_and_swap(&queue->free_head,
 		                                       curr_free, next_desc);
 		if (prev_val == curr_free) {
 			// swap was successful
 			__sync_add_and_fetch(&queue->mod_count, 1);
-			element->data = edata;
-			return 0;
+			 return data;
 		}
 		curr_free = prev_val;
 	}
-	return ENOMEM;
+	return NULL;
 }
 
-void lf_queue_put(lf_queue *queue, lf_element_t *element)
+void lf_queue_put(lf_queue *queue, void *data)
 {
 	element_descriptor_t curr_free = queue->free_head;
 	element_descriptor_t prev_val;
 
 	assert(queue->magic == LF_QUEUE_MAGIC);
 	do {
-		*(element_descriptor_t *)element->data = curr_free;
+		*(element_descriptor_t *)data = curr_free;
 		prev_val = __sync_val_compare_and_swap(&queue->free_head,
 		                                       curr_free,
-		                                       get_free_list_descriptor(queue, element->data));
+		                                       get_free_list_descriptor(queue, data));
 		if (prev_val == curr_free) {
 			break;
 		}
@@ -208,7 +207,7 @@ void lf_queue_put(lf_queue *queue, lf_element_t *element)
 	} while (true);
 }
 
-void lf_queue_enqueue(lf_queue *queue, lf_element_t *element)
+void lf_queue_enqueue(lf_queue *queue, void *data)
 {
 	element_descriptor_t *desc_ptr;
 	element_descriptor_t elem_desc;
@@ -231,7 +230,7 @@ void lf_queue_enqueue(lf_queue *queue, lf_element_t *element)
 			continue;
 		}
 		if (__sync_bool_compare_and_swap(desc_ptr, elem_desc,
-		                                 USED_BIT | get_element_descriptor(queue, element->data))) {
+		                                 USED_BIT | get_element_descriptor(queue, data))) {
 			// one could claim since tail always advances there is the
 			// risk of a wraparound. However this is not a practical
 			// concern since even if you add a new item to the queue
@@ -243,7 +242,7 @@ void lf_queue_enqueue(lf_queue *queue, lf_element_t *element)
 	} while (true);
 }
 
-int lf_queue_dequeue(lf_queue *queue, lf_element_t *element)
+void *lf_queue_dequeue(lf_queue *queue)
 {
 	element_descriptor_t elem_desc;
 	element_descriptor_t *desc_ptr;
@@ -253,7 +252,7 @@ int lf_queue_dequeue(lf_queue *queue, lf_element_t *element)
 		size_t head = __sync_add_and_fetch(&queue->head, 0);
 		size_t tail = __sync_add_and_fetch(&queue->tail, 0);
 		if (head > tail) {
-			return ENOMEM;
+			return NULL;
 		}
 		desc_ptr = &descriptors_start(queue)[head % queue->n_elements];
 		elem_desc = *desc_ptr;
@@ -274,8 +273,7 @@ int lf_queue_dequeue(lf_queue *queue, lf_element_t *element)
 		}
 		if (__sync_bool_compare_and_swap(desc_ptr, elem_desc, tail)) {
 			__sync_add_and_fetch(&queue->head, 1);
-			element->data = get_element_data_by_descriptor(queue, elem_desc & ~USED_BIT);
-			return 0;
+			return get_element_data_by_descriptor(queue, elem_desc & ~USED_BIT);
 		}
 	} while (true);
 }

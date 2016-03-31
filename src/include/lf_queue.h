@@ -9,10 +9,6 @@ extern "C" {
 
 typedef struct lf_queue lf_queue;
 
-typedef struct lf_element {
-    void *data;
-} lf_element_t;
-
 // return the amount of memory required for a lock free queue
 size_t lf_queue_get_required_memory(size_t n_elements, size_t element_size);
 // init the lock free queue from a pre allocated chunk of memory
@@ -27,14 +23,14 @@ lf_queue *lf_queue_attach(void *mem);
 void lf_queue_destroy(lf_queue *queue);
 // get an element from the queue that to be later on queued by calling lf_queue_enqueue
 // will fail with ENOMEM in case all of the elements in the queue are already in use
-int lf_queue_get(lf_queue *queue, lf_element_t *element);
+void *lf_queue_get(lf_queue *queue);
 // enqueue an element that was obtained by a call to lf_queue_get
-void lf_queue_enqueue(lf_queue *queue, lf_element_t *element);
+void lf_queue_enqueue(lf_queue *queue, void *data);
 // dequeue an element from the queue, the element must be later returned by a call
 // to lf_queue_put
-int lf_queue_dequeue(lf_queue *queue, lf_element_t *element);
+void *lf_queue_dequeue(lf_queue *queue);
 // return an element to the queue that was obtained by a call lf_queue_dequeue
-void lf_queue_put(lf_queue *queue, lf_element_t *element);
+void lf_queue_put(lf_queue *queue, void *data);
 
 #ifdef __cplusplus
 }
